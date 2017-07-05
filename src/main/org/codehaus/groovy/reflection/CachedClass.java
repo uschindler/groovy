@@ -52,11 +52,11 @@ public class CachedClass {
     
     private static final MethodHandle MH_trySetAccessible;
     static {
-      final Lookup lookup = MethodHandles.publicLookup();
+      final Lookup lookup = MethodHandles.lookup();
       MethodHandle mh;
       try {
         mh = lookup.findVirtual(AccessibleObject.class, "trySetAccessible", MethodType.methodType(boolean.class));
-      } catch (SecurityException/*should never happen for publicLookup*/ | ReflectiveOperationException e) {
+      } catch (SecurityException/*should never happen for public methods*/ | ReflectiveOperationException e) {
         mh = null;
       }
       MH_trySetAccessible = mh;

@@ -27,11 +27,19 @@ import org.codehaus.groovy.util.LazyReference;
 import org.codehaus.groovy.util.FastArray;
 import org.codehaus.groovy.util.ReferenceBundle;
 
+import static java.lang.invoke.MethodType.methodType;
+
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodHandles.Lookup;
+import java.lang.invoke.MethodType;
 import java.lang.reflect.AccessibleObject;
 import java.lang.reflect.Array;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
+import java.lang.reflect.Member;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.util.*;
@@ -45,6 +53,34 @@ public class CachedClass {
     public ClassInfo classInfo;
     
     private static ReferenceBundle softBundle = ReferenceBundle.getSoftBundle();
+    
+    private static final String MY_PACKAGE = CachedClass.class.getPackage().getName();
+    private static final MethodHandle MH_Class_getModule, MH_Module_isOpen;
+    private static final /* java.lang.Module */ Object GROOVY_MODULE;
+    static {
+      final Lookup lookup = MethodHandles.lookup();
+      MethodHandle mh1, mh2;
+      try {
+        final Class<?> moduleClass = Class.forName("java.lang.Module");
+        final MethodType mt = methodType(moduleClass);
+        mh1 = lookup.findVirtual(Class.class, "getModule", mt);
+        mh1 = mh1.asType(methodType(Object.class, Class.class));
+        mh2 = lookup.findVirtual(moduleClass, "isOpen", methodType(boolean.class, String.class, moduleClass));
+        mh2 = mh2.asType(methodType(boolean.class, Object.class, String.class, Object.class));
+      } catch (SecurityException/*should never happen for public methods*/ | ReflectiveOperationException e) {
+        mh1 = mh2 = null;
+      }
+      MH_Class_getModule = mh1;
+      MH_Module_isOpen = mh2;
+      
+      Object module;
+      try {
+        module = MH_Class_getModule.invokeExact(CachedClass.class);
+      } catch (Throwable t) {
+        module = null;
+      }
+      GROOVY_MODULE = module;
+    }
 
     private final LazyReference<CachedField[]> fields = new LazyReference<CachedField[]>(softBundle) {
         public CachedField[] initValue() {
@@ -77,9 +113,52 @@ public class CachedClass {
             return constructors;
         }
     };
+    
+    /**
+     * Returns {@code true} if the cached class is in the same Java 9 module as Groovy or if its module
+     * opens it to Groovy's module, {@code false} if it's from a foreign module (e.g., the Java runtime)
+     * and it has not opened the package.
+     * For previous Java versions it always returns {@code true}.
+     */
+    private boolean isClassOpen() {
+        if (MH_Class_getModule != null && GROOVY_MODULE != null) {
+            try {
+                /* java.lang.Module */ Object module = (Object) MH_Class_getModule.invokeExact(getTheClass());
+                if (GROOVY_MODULE.equals(module)) {
+                    return true;
+                }
+                final boolean isOpen = (boolean) MH_Module_isOpen.invokeExact(module, MY_PACKAGE, GROOVY_MODULE);
+                if (isOpen) {
+                    return true;
+                }
+                // in Java 9 we cannot make anything accessible from a foreign module by default!
+                return false;
+            } catch (SecurityException se) {
+                // swallow
+            } catch (RuntimeException | Error e) {
+                throw e;
+            } catch (Throwable t) {
+                throw new AssertionError("Should never happen", t);
+            }
+        }
+        return true;
+    }
 
     // to be run in PrivilegedAction!
-    private static AccessibleObject[] makeAccessible(final AccessibleObject[] aoa) {
+    private AccessibleObject[] makeAccessible(final AccessibleObject[] aoa) {
+        if (!isClassOpen()) {
+            // we can only make public members available in Java 9, if the class is from a different module:
+            final ArrayList<AccessibleObject> ret = new ArrayList<>(aoa.length);
+            for (final AccessibleObject ao : aoa) {
+                final Member m = (Member) ao;
+                if (Modifier.isPublic(m.getModifiers())) {
+                  // no need to call setAccessible, as it's public already!
+                  ret.add(ao);
+                }
+            }
+            return ret.toArray((AccessibleObject[]) Array.newInstance(aoa.getClass().getComponentType(), ret.size()));
+        }
+        
         try {
             AccessibleObject.setAccessible(aoa, true);
             return aoa;
@@ -92,7 +171,7 @@ public class CachedClass {
                     ao.setAccessible(true);
                     ret.add(ao);
                 } catch (Throwable inner) {
-                    // swallow for strict security managers, module systems, android or others
+                    // swallow for strict security managers, android or others
                 }
             }
             return ret.toArray((AccessibleObject[]) Array.newInstance(aoa.getClass().getComponentType(), ret.size()));

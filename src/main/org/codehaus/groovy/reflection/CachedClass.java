@@ -27,6 +27,10 @@ import org.codehaus.groovy.util.LazyReference;
 import org.codehaus.groovy.util.FastArray;
 import org.codehaus.groovy.util.ReferenceBundle;
 
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodHandles.Lookup;
+import java.lang.invoke.MethodType;
 import java.lang.reflect.AccessibleObject;
 import java.lang.reflect.Array;
 import java.lang.reflect.Constructor;
@@ -45,6 +49,18 @@ public class CachedClass {
     public ClassInfo classInfo;
     
     private static ReferenceBundle softBundle = ReferenceBundle.getSoftBundle();
+    
+    private static final MethodHandle MH_trySetAccessible;
+    static {
+      final Lookup lookup = MethodHandles.publicLookup();
+      MethodHandle mh;
+      try {
+        mh = lookup.findVirtual(AccessibleObject.class, "trySetAccessible", MethodType.methodType(boolean.class));
+      } catch (SecurityException | ReflectiveOperationException e) {
+        mh = null;
+      }
+      MH_trySetAccessible = mh;
+    }
 
     private final LazyReference<CachedField[]> fields = new LazyReference<CachedField[]>(softBundle) {
         public CachedField[] initValue() {
@@ -80,22 +96,43 @@ public class CachedClass {
 
     // to be run in PrivilegedAction!
     private static AccessibleObject[] makeAccessible(final AccessibleObject[] aoa) {
-        try {
-            AccessibleObject.setAccessible(aoa, true);
-            return aoa;
-        } catch (Throwable outer) {
-            // swallow for strict security managers, module systems, android or others,
-            // but try one-by-one to get the allowed ones at least
+        if (MH_trySetAccessible != null) {
+            // Java 9+
             final ArrayList<AccessibleObject> ret = new ArrayList<>(aoa.length);
             for (final AccessibleObject ao : aoa) {
                 try {
-                    ao.setAccessible(true);
-                    ret.add(ao);
-                } catch (Throwable inner) {
-                    // swallow for strict security managers, module systems, android or others
+                    final boolean success = (boolean) MH_trySetAccessible.invokeExact(ao);
+                    if (success) {
+                      ret.add(ao);
+                    }
+                } catch (SecurityException se) {
+                    // swallow
+                } catch (RuntimeException | Error e) {
+                    throw e;
+                } catch (Throwable t) {
+                    throw new AssertionError("Should never happen", t);
                 }
             }
             return ret.toArray((AccessibleObject[]) Array.newInstance(aoa.getClass().getComponentType(), ret.size()));
+        } else {
+            // Java 7/8:
+            try {
+                AccessibleObject.setAccessible(aoa, true);
+                return aoa;
+            } catch (Throwable outer) {
+                // swallow for strict security managers, module systems, android or others,
+                // but try one-by-one to get the allowed ones at least
+                final ArrayList<AccessibleObject> ret = new ArrayList<>(aoa.length);
+                for (final AccessibleObject ao : aoa) {
+                    try {
+                        ao.setAccessible(true);
+                        ret.add(ao);
+                    } catch (Throwable inner) {
+                        // swallow for strict security managers, android or others
+                    }
+                }
+                return ret.toArray((AccessibleObject[]) Array.newInstance(aoa.getClass().getComponentType(), ret.size()));
+            }
         }
     }
 

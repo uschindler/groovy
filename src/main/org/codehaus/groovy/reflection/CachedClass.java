@@ -36,7 +36,9 @@ import java.lang.reflect.AccessibleObject;
 import java.lang.reflect.Array;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
+import java.lang.reflect.Member;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.util.*;
@@ -57,7 +59,7 @@ public class CachedClass {
       MethodHandle mh_check, mh_canAccess;
       try {
         // MethodHandle to check if we can access a member without setAccessible:
-        mh_canAccess = lookup.findVirtual(AccessibleObject.class, "canAccess", methodType(boolean.class));
+        mh_canAccess = lookup.findVirtual(AccessibleObject.class, "canAccess", methodType(boolean.class, Object.class));
         
         /* create a pre-compiled MethodHandle that is identical to following Java 9 code:
          *  boolean moduleCheck(Class clazz) {
@@ -137,14 +139,23 @@ public class CachedClass {
     // to be run in PrivilegedAction!
     private AccessibleObject[] makeAccessible(final AccessibleObject[] aoa) {
         if (!isClassOpen()) {
-            // we can only make public members available in Java 9, if the class is from a different module:
+            assert MH_CAN_ACCESS != null;
+            // if the class is from a different / not open module, we can only make public members available in Java 9:
             final ArrayList<AccessibleObject> ret = new ArrayList<>(aoa.length);
             for (final AccessibleObject ao : aoa) {
                 try {
-                    final boolean canAccess = (boolean) MH_CAN_ACCESS.invokeExact(ao);
-                    if (canAccess) {
-                      // no need to call setAccessible, as it's public already!
-                      ret.add(ao);
+                    final int modifiers = ((Member) ao).getModifiers();
+                    if (Modifier.isStatic(modifiers)) {
+                        // if the member is static we can use Java9's AccessibleObject#canAccess(null):
+                        final boolean canAccess = (boolean) MH_CAN_ACCESS.invokeExact(ao, (Object) null);
+                        if (canAccess) {
+                          // no need to call setAccessible, as it's accessible already
+                          ret.add(ao);
+                        }
+                    } else if (Modifier.isPublic(modifiers)) {
+                        // if it's public we have good chances to access it, we cannot do better checks
+                        // as we have no instance to call Java9's AccessibleObject#canAccess(null):
+                        ret.add(ao);
                     }
                 } catch (RuntimeException | Error e) {
                     throw e;

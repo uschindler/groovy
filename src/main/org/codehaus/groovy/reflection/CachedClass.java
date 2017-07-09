@@ -124,9 +124,6 @@ public class CachedClass {
         if (MH_Class_getModule != null && GROOVY_MODULE != null) {
             try {
                 /* java.lang.Module */ Object module = (Object) MH_Class_getModule.invokeExact(getTheClass());
-                if (GROOVY_MODULE.equals(module)) {
-                    return true;
-                }
                 final boolean isOpen = (boolean) MH_Module_isOpen.invokeExact(module, MY_PACKAGE, GROOVY_MODULE);
                 if (isOpen) {
                     return true;

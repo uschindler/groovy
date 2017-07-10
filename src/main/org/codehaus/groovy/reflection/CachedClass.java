@@ -63,17 +63,21 @@ public class CachedClass {
         
         /* create a pre-compiled MethodHandle that is identical to following Java 9 code:
          *  boolean moduleCheck(Class clazz) {
-         *   Module m = clazz.getModule();
-         *   return m.isOpen(CachedClass.class.getPackage().getName(), CachedClass.class.getModule());
+         *   Module module = clazz.getModule();
+         *   String package = clazz.getPackage().getName();
+         *   return module.isOpen(package, CachedClass.class.getModule());
          *  }
          */
         final Class<?> moduleClass = Class.forName("java.lang.Module");
         final MethodHandle mh_Class_getModule = lookup.findVirtual(Class.class, "getModule", methodType(moduleClass));
         final MethodHandle mh_Module_isOpen = lookup.findVirtual(moduleClass, "isOpen",
             methodType(boolean.class, String.class, moduleClass));
+        final MethodHandle mh_getPackageOfClass = lookup.findStatic(CachedClass.class, "getPackageOfClass",
+            methodType(String.class, Class.class));
         final Object module = mh_Class_getModule.invoke(CachedClass.class);
-        mh_check = MethodHandles.insertArguments(mh_Module_isOpen, 1, CachedClass.class.getPackage().getName(), module);
-        mh_check = MethodHandles.filterArguments(mh_check, 0, mh_Class_getModule);
+        mh_check = MethodHandles.insertArguments(mh_Module_isOpen, 2, module);
+        mh_check = MethodHandles.filterArguments(mh_check, 0, mh_Class_getModule, mh_getPackageOfClass);
+        mh_check = MethodHandles.foldArguments(mh_check, MethodHandles.identity(Class.class));
       } catch (SecurityException/*should never happen for public methods*/ | ReflectiveOperationException e) {
         mh_check = mh_canAccess = null;
       } catch (RuntimeException | Error e) {
@@ -83,6 +87,11 @@ public class CachedClass {
       }
       MH_MODULE_CHECK = mh_check;
       MH_CAN_ACCESS = mh_canAccess;
+    }
+    
+    @SuppressWarnings("unused")
+    private static String getPackageOfClass(Class<?> clazz) {
+      return clazz.getPackage().getName();
     }
 
     private final LazyReference<CachedField[]> fields = new LazyReference<CachedField[]>(softBundle) {
@@ -138,6 +147,7 @@ public class CachedClass {
 
     // to be run in PrivilegedAction!
     private AccessibleObject[] makeAccessible(final AccessibleObject[] aoa) {
+        // System.err.println(getTheClass() + " is open: " + isClassOpen());
         if (!isClassOpen()) {
             assert MH_CAN_ACCESS != null;
             // if the class is from a different / not open module, we can only make public members available in Java 9:
@@ -145,7 +155,7 @@ public class CachedClass {
             for (final AccessibleObject ao : aoa) {
                 try {
                     final int modifiers = ((Member) ao).getModifiers();
-                    if (Modifier.isStatic(modifiers)) {
+                    if (Modifier.isStatic(modifiers) || ao instanceof Constructor) {
                         // if the member is static we can use Java9's AccessibleObject#canAccess(null):
                         final boolean canAccess = (boolean) MH_CAN_ACCESS.invokeExact(ao, (Object) null);
                         if (canAccess) {

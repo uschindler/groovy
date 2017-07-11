@@ -64,7 +64,7 @@ public class CachedClass {
         /* create a pre-compiled MethodHandle that is identical to following Java 9 code:
          *  boolean moduleCheck(Class clazz) {
          *   Module module = clazz.getModule();
-         *   String package = clazz.getPackage().getName();
+         *   String package = clazz.getPackageName();
          *   return module.isOpen(package, CachedClass.class.getModule());
          *  }
          */
@@ -72,11 +72,11 @@ public class CachedClass {
         final MethodHandle mh_Class_getModule = lookup.findVirtual(Class.class, "getModule", methodType(moduleClass));
         final MethodHandle mh_Module_isOpen = lookup.findVirtual(moduleClass, "isOpen",
             methodType(boolean.class, String.class, moduleClass));
-        final MethodHandle mh_getPackageOfClass = lookup.findStatic(CachedClass.class, "getPackageOfClass",
-            methodType(String.class, Class.class));
+        final MethodHandle mh_Class_getPackageName = lookup.findVirtual(Class.class, "getPackageName",
+            methodType(String.class));
         final Object module = mh_Class_getModule.invoke(CachedClass.class);
         mh_check = MethodHandles.insertArguments(mh_Module_isOpen, 2, module);
-        mh_check = MethodHandles.filterArguments(mh_check, 0, mh_Class_getModule, mh_getPackageOfClass);
+        mh_check = MethodHandles.filterArguments(mh_check, 0, mh_Class_getModule, mh_Class_getPackageName);
         mh_check = MethodHandles.foldArguments(mh_check, MethodHandles.identity(Class.class));
       } catch (SecurityException/*should never happen for public methods*/ | ReflectiveOperationException e) {
         mh_check = mh_canAccess = null;
@@ -89,11 +89,6 @@ public class CachedClass {
       MH_CAN_ACCESS = mh_canAccess;
     }
     
-    @SuppressWarnings("unused")
-    private static String getPackageOfClass(Class<?> clazz) {
-      return clazz.getPackage().getName();
-    }
-
     private final LazyReference<CachedField[]> fields = new LazyReference<CachedField[]>(softBundle) {
         public CachedField[] initValue() {
             final Field[] declaredFields = (Field[])

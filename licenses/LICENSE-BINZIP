@@ -217,9 +217,9 @@ See licenses/antlr4-license.txt for details.
 
 ------------------------------------------------------------------------
 
-ASM 4 License
+ASM License
 
-ASM 4 uses a 3-clause BSD license. For details, see licenses/asm-license.txt.
+ASM uses a 3-clause BSD license. For details, see licenses/asm-license.txt.
 
 ------------------------------------------------------------------------
 
@@ -234,19 +234,6 @@ JLine2 License (optional dependency used with groovysh)
 
 This product bundles the JLine2 jar, which is available under a
 BSD License.  For details, see licenses/jline2-license.
-
-------------------------------------------------------------------------
-
-JLine2 Patch License
-
-The following class within this product:
-
-    org.codehaus.groovy.tools.shell.completion.FileNameCompleter
-
-was derived from JLine 2.12, and the following patch:
-https://github.com/jline/jline2/issues/90
-JLine2 is made available under a BSD License.
-For details, see licenses/jline2-license.
 
 ------------------------------------------------------------------------
 

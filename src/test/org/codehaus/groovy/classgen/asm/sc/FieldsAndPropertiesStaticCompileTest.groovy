@@ -185,6 +185,75 @@ class FieldsAndPropertiesStaticCompileTest extends FieldsAndPropertiesSTCTest im
         assert astTrees['B'][1].contains('INVOKEVIRTUAL B.setX')
     }
 
+    void testUseDirectWriteFieldAccessFromOutsideClass() {
+        assertScript '''
+            class A {
+                public int x
+            }
+            class B  {
+                void directAccess(A a) {
+                    a.@x = 2
+                }
+            }
+            B b = new B()
+            A a = new A()
+            b.directAccess(a)
+            assert a.x == 2
+        '''
+        assert astTrees['B'][1].contains('PUTFIELD A.x')
+    }
+
+    void testUseDirectWriteFieldAccessPrivateWithRuntimeClassBeingDifferent() {
+        assertScript '''
+            class A {
+                private int x
+                public A(int x) {
+                    this.@x = x
+                }
+                public boolean sameAs(A a) {
+                    return this.@x == a.@x
+                }
+            }
+            class B extends A {
+                // B.x visible in B A.x in A, but reflection depending on the runtime type
+                // would see B.x in A#sameAs and not A.x
+                private int x 
+                public B(int x) {
+                    super(x)
+                    this.@x = x + 50
+                }
+            }
+            B b = new B(1)
+            A a = new A(1)
+            assert b.sameAs(a)
+        '''
+        // same with property style access:
+        assertScript '''
+            class A {
+                private int x
+                public A(int x) {
+                    this.x = x
+                }
+                public boolean sameAs(A a) {
+                    return this.x == a.x
+                }
+            }
+            class B extends A {
+                // B.x visible in B A.x in A, but reflection depending on the runtime type
+                // would see B.x in A#sameAs and not A.x
+                private int x 
+                public B(int x) {
+                    super(x)
+                    this.x = x + 50
+                }
+            }
+            B b = new B(1)
+            A a = new A(1)
+            assert b.sameAs(a)
+        '''
+
+    }
+
     void testDirectReadFieldFromSameClass() {
         assertScript '''
             class A {
@@ -694,6 +763,22 @@ import org.codehaus.groovy.transform.sc.ListOfExpressionsExpression
             assert !astTrees['A'][1].contains('pfaccess$1') // no accessor bridge method for 'mutated'
             assert astTrees['A$_closure1'][1].contains('INVOKESTATIC A.pfaccess$2 (LA;)Ljava/lang/String;')
             assert astTrees['A$_closure1'][1].contains('INVOKESTATIC A.pfaccess$02 (LA;Ljava/lang/String;)Ljava/lang/String;')
+        }
+    }
+
+    //GROOVY-8369
+    void testPropertyAccessOnEnumClass() {
+        try {
+            assertScript '''
+                enum Foo {}
+
+                def test() {
+                    assert Foo.getModifiers() == Foo.modifiers
+                }    
+                test()
+            '''
+        } finally {
+            //println astTrees
         }
     }
 }

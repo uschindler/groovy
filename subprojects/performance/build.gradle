@@ -19,15 +19,29 @@
 
 import java.text.DecimalFormat
 
+plugins {
+    id "me.champeau.gradle.jmh" version "0.4.2"
+}
+
 configurations {
     stats
     testCompile.extendsFrom(stats)
 }
 
 dependencies {
-    testCompile 'org.codehaus.groovy:groovy:2.4.7'
+    jmh rootProject
+    testCompile 'org.codehaus.groovy:groovy-all:2.4.12'
     stats 'org.apache.commons:commons-math3:3.6'
 }
+
+jmh {
+    jmhVersion = '1.19'
+    if (project.hasProperty('benchInclude')) {
+        include = ['.*' + project.benchInclude + '.*']
+    }
+    includeTests = true
+}
+jmhClasses.dependsOn clean
 
 sourceCompatibility = 1.8
 targetCompatibility = 1.8
@@ -36,7 +50,7 @@ task performanceTests {
     ext.outputDir = file("$buildDir/compilation")
     ext.dataFile = file("$buildDir/compilation-stats.csv")
 
-    dependsOn rootProject.jarAll
+    dependsOn rootProject.jar
     doLast {
         ext.outputDir.deleteDir()
         def versions = []
@@ -65,7 +79,7 @@ task performanceTests {
         dependsOn compileTestJava
         def groovyConf = configurations.detachedConfiguration(
                 dependencies.create(
-                        'current' == version ? files(rootProject.jarAll.archivePath) : "org.codehaus.groovy:groovy-all:$version")
+                        'current' == version ? files(rootProject.jar.archivePath) : "org.codehaus.groovy:groovy:$version")
         )
         groovyConf.transitive = false
         main = 'org.apache.groovy.perf.CompilerPerformanceTest'
@@ -98,7 +112,7 @@ task performanceTests {
                     groovyConf.files[0]
             ]
             rootProject.sourceSets.test.compileClasspath.files
-                    .findAll { it.name.endsWith('jar') && !it.name.contains('groovy') }
+                    .findAll { it.name.endsWith('jar') && !it.name.contains('groovy') && !it.name.contains('antlr') && !it.name.contains('asm') }
                     .collect(compileClassPath) { it.absolutePath }
 
             args = [

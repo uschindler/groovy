@@ -26,7 +26,7 @@ class GroovyMainTest extends GroovyTestCase {
         String[] args = ['-h']
         GroovyMain.processArgs(args, ps)
         def out = baos.toString()
-        assert out.contains('usage: groovy')
+        assert out.contains('Usage: groovy')
         ['-a', '-c', '-d', '-e', '-h', '-i', '-l', '-n', '-p', '-v'].each{
             assert out.contains(it)
         }
@@ -51,7 +51,7 @@ class GroovyMainTest extends GroovyTestCase {
         String[] args = ['abc.java']
         GroovyMain.processArgs(args, ps)
         def out = baos.toString()
-        assert out.contains('error: error: cannot compile file with .java extension: abc.java')
+        assert out.contains('error: cannot compile file with .java extension: abc.java')
     }
 
     /**

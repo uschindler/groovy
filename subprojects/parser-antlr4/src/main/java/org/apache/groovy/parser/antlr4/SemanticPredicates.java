@@ -92,7 +92,6 @@ public class SemanticPredicates {
      * Method name should not end with "2: arguments" and "3: closure"
      *
      * @param t the type of pathExpression
-     * @return
      */
     public static boolean isFollowingMethodName(int t) {
         return !(2 == t || 3 == t);
@@ -142,10 +141,10 @@ public class SemanticPredicates {
         tokenType = token.getType();
         tokenType3 = ts.LT(index + 2).getType();
 
-        return //VOID == tokenType ||
+        return // VOID == tokenType ||
                 !(BuiltInPrimitiveType == tokenType || MODIFIER_SET.contains(tokenType))
-                    && Character.isLowerCase(token.getText().codePointAt(0))
-                    && !(ASSIGN == tokenType3 || (LT == tokenType2 || LBRACK == tokenType2));
+                        && Character.isLowerCase(token.getText().codePointAt(0))
+                        && !(ASSIGN == tokenType3 || (LT == tokenType2 || LBRACK == tokenType2));
 
     }
 

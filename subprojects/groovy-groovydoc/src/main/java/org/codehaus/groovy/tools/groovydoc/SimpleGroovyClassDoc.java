@@ -18,10 +18,27 @@
  */
 package org.codehaus.groovy.tools.groovydoc;
 
-import org.codehaus.groovy.groovydoc.*;
+import org.codehaus.groovy.groovydoc.GroovyAnnotationRef;
+import org.codehaus.groovy.groovydoc.GroovyClassDoc;
+import org.codehaus.groovy.groovydoc.GroovyConstructorDoc;
+import org.codehaus.groovy.groovydoc.GroovyFieldDoc;
+import org.codehaus.groovy.groovydoc.GroovyMethodDoc;
+import org.codehaus.groovy.groovydoc.GroovyPackageDoc;
+import org.codehaus.groovy.groovydoc.GroovyParameter;
+import org.codehaus.groovy.groovydoc.GroovyRootDoc;
+import org.codehaus.groovy.groovydoc.GroovyType;
 import org.codehaus.groovy.runtime.DefaultGroovyMethods;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.StringTokenizer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -99,7 +116,7 @@ public class SimpleGroovyClassDoc extends SimpleGroovyAbstractableElementDoc imp
      */
     public GroovyConstructorDoc[] constructors() {
         Collections.sort(constructors);
-        return constructors.toArray(new GroovyConstructorDoc[constructors.size()]);
+        return constructors.toArray(new GroovyConstructorDoc[0]);
     }
 
     public boolean add(GroovyConstructorDoc constructor) {
@@ -128,7 +145,7 @@ public class SimpleGroovyClassDoc extends SimpleGroovyAbstractableElementDoc imp
      */
     public GroovyClassDoc[] innerClasses() {
         Collections.sort(nested);
-        return nested.toArray(new GroovyClassDoc[nested.size()]);
+        return nested.toArray(new GroovyClassDoc[0]);
     }
 
     public boolean addNested(GroovyClassDoc nestedClass) {
@@ -140,7 +157,7 @@ public class SimpleGroovyClassDoc extends SimpleGroovyAbstractableElementDoc imp
      */
     public GroovyFieldDoc[] fields() {
         Collections.sort(fields);
-        return fields.toArray(new GroovyFieldDoc[fields.size()]);
+        return fields.toArray(new GroovyFieldDoc[0]);
     }
 
     public boolean add(GroovyFieldDoc field) {
@@ -152,7 +169,7 @@ public class SimpleGroovyClassDoc extends SimpleGroovyAbstractableElementDoc imp
      */
     public GroovyFieldDoc[] properties() {
         Collections.sort(properties);
-        return properties.toArray(new GroovyFieldDoc[properties.size()]);
+        return properties.toArray(new GroovyFieldDoc[0]);
     }
 
     public boolean addProperty(GroovyFieldDoc property) {
@@ -164,7 +181,7 @@ public class SimpleGroovyClassDoc extends SimpleGroovyAbstractableElementDoc imp
      */
     public GroovyFieldDoc[] enumConstants() {
         Collections.sort(enumConstants);
-        return enumConstants.toArray(new GroovyFieldDoc[enumConstants.size()]);
+        return enumConstants.toArray(new GroovyFieldDoc[0]);
     }
 
     public boolean addEnumConstant(GroovyFieldDoc field) {
@@ -176,7 +193,7 @@ public class SimpleGroovyClassDoc extends SimpleGroovyAbstractableElementDoc imp
      */
     public GroovyMethodDoc[] methods() {
         Collections.sort(methods);
-        return methods.toArray(new GroovyMethodDoc[methods.size()]);
+        return methods.toArray(new GroovyMethodDoc[0]);
     }
 
     public boolean add(GroovyMethodDoc method) {
@@ -251,8 +268,7 @@ public class SimpleGroovyClassDoc extends SimpleGroovyAbstractableElementDoc imp
     public Set<GroovyClassDoc> getParentInterfaces() {
         Set<GroovyClassDoc> result = new LinkedHashSet<GroovyClassDoc>();
         result.add(this);
-        Set<GroovyClassDoc> next = new LinkedHashSet<GroovyClassDoc>();
-        next.addAll(Arrays.asList(this.interfaces()));
+        Set<GroovyClassDoc> next = new LinkedHashSet<GroovyClassDoc>(Arrays.asList(this.interfaces()));
         while (!next.isEmpty()) {
             Set<GroovyClassDoc> temp = next;
             next = new LinkedHashSet<GroovyClassDoc>();
@@ -459,7 +475,7 @@ public class SimpleGroovyClassDoc extends SimpleGroovyAbstractableElementDoc imp
                     }
                     sb = new StringBuilder(getDocUrl(outerType, full, links, relativePath, rootDoc, classDoc));
                     sb.append("&lt;");
-                    sb.append(DefaultGroovyMethods.join(typeUrls, ", "));
+                    sb.append(DefaultGroovyMethods.join((Iterable) typeUrls, ", "));
                     sb.append("&gt;");
                     return sb.toString();
                 }
@@ -715,7 +731,7 @@ public class SimpleGroovyClassDoc extends SimpleGroovyAbstractableElementDoc imp
 
     public GroovyClassDoc[] interfaces() {
         Collections.sort(interfaceClasses);
-        return interfaceClasses.toArray(new GroovyClassDoc[interfaceClasses.size()]);
+        return interfaceClasses.toArray(new GroovyClassDoc[0]);
     }
 
     public GroovyType[] interfaceTypes() {/*todo*/
@@ -893,7 +909,7 @@ public class SimpleGroovyClassDoc extends SimpleGroovyAbstractableElementDoc imp
                 sb.append(preKey);
                 sb.append(e.getKey());
                 sb.append(postKey);
-                sb.append(DefaultGroovyMethods.join(e.getValue(), valueSeparator));
+                sb.append(DefaultGroovyMethods.join((Iterable)e.getValue(), valueSeparator));
                 sb.append(postValues);
             }
             return sb.toString();

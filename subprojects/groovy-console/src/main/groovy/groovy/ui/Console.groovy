@@ -18,64 +18,52 @@
  */
 package groovy.ui
 
-import groovy.inspect.swingui.ObjectBrowser
 import groovy.inspect.swingui.AstBrowser
+import groovy.inspect.swingui.ObjectBrowser
 import groovy.swing.SwingBuilder
+import groovy.transform.ThreadInterrupt
 import groovy.ui.text.FindReplaceUtility
+import org.apache.groovy.io.StringBuilderWriter
 import org.codehaus.groovy.antlr.LexerFrame
+import org.codehaus.groovy.control.CompilerConfiguration
+import org.codehaus.groovy.control.ErrorCollector
+import org.codehaus.groovy.control.MultipleCompilationErrorsException
+import org.codehaus.groovy.control.customizers.ASTTransformationCustomizer
+import org.codehaus.groovy.control.messages.ExceptionMessage
 import org.codehaus.groovy.control.messages.SimpleMessage
+import org.codehaus.groovy.control.messages.SyntaxErrorMessage
+import org.codehaus.groovy.runtime.StackTraceUtils
+import org.codehaus.groovy.runtime.StringGroovyMethods
+import org.codehaus.groovy.syntax.SyntaxException
 import org.codehaus.groovy.tools.shell.util.MessageSource
+import org.codehaus.groovy.transform.ThreadInterruptibleASTTransformation
 
-import java.awt.Component
-import java.awt.EventQueue
-import java.awt.Font
-import java.awt.Toolkit
-import java.awt.Window
-import java.awt.event.ActionEvent
-import java.awt.event.ComponentEvent
-import java.awt.event.ComponentListener
-import java.awt.event.FocusListener
-import java.awt.event.FocusEvent
-import java.util.prefs.Preferences
 import javax.swing.*
 import javax.swing.event.CaretEvent
 import javax.swing.event.CaretListener
-import javax.swing.event.HyperlinkListener
+import javax.swing.event.DocumentListener
 import javax.swing.event.HyperlinkEvent
+import javax.swing.event.HyperlinkListener
+import javax.swing.filechooser.FileFilter
 import javax.swing.text.AttributeSet
 import javax.swing.text.Element
 import javax.swing.text.SimpleAttributeSet
 import javax.swing.text.Style
 import javax.swing.text.StyleConstants
 import javax.swing.text.html.HTML
-import javax.swing.filechooser.FileFilter
-
-import org.codehaus.groovy.runtime.StackTraceUtils
-import org.codehaus.groovy.control.ErrorCollector
-import org.codehaus.groovy.control.MultipleCompilationErrorsException
-import org.codehaus.groovy.control.messages.SyntaxErrorMessage
-import org.codehaus.groovy.syntax.SyntaxException
-import org.codehaus.groovy.control.messages.ExceptionMessage
-import java.awt.Dimension
-import java.awt.BorderLayout
-import org.codehaus.groovy.control.CompilerConfiguration
-import org.codehaus.groovy.control.customizers.ASTTransformationCustomizer
-import groovy.transform.ThreadInterrupt
-import javax.swing.event.DocumentListener
+import java.awt.*
+import java.awt.event.ActionEvent
+import java.awt.event.ComponentEvent
+import java.awt.event.ComponentListener
+import java.awt.event.FocusEvent
+import java.awt.event.FocusListener
+import java.util.List
+import java.util.prefs.Preferences
 
 /**
  * Groovy Swing console.
  *
  * Allows user to interactively enter and execute Groovy.
- *
- * @author Danno Ferrin
- * @author Dierk Koenig, changed Layout, included Selection sensitivity, included ObjectBrowser
- * @author Alan Green more features: history, System.out capture, bind result to _
- * @author Guillaume Laforge, stacktrace hyperlinking to the current script line
- * @author Hamlet D'Arcy, AST browser
- * @author Roshan Dawrani
- * @author Paul King
- * @author Andre Steingress
  */
 class Console implements CaretListener, HyperlinkListener, ComponentListener, FocusListener {
 
@@ -200,7 +188,7 @@ class Console implements CaretListener, HyperlinkListener, ComponentListener, Fo
     Action selectWordAction
     Action selectPreviousWordAction
 
-    ConsolePreferences consolePreferences;
+    ConsolePreferences consolePreferences
 
     static void main(args) {
         CliBuilder cli = new CliBuilder(usage: 'groovyConsole [options] [filename]', stopAtNonOption: false)
@@ -212,6 +200,8 @@ class Console implements CaretListener, HyperlinkListener, ComponentListener, Fo
             V(longOpt: 'version', messages['cli.option.version.description'])
             pa(longOpt: 'parameters', messages['cli.option.parameters.description'])
             i(longOpt: 'indy', messages['cli.option.indy.description'])
+            D(longOpt: 'define', args: 2, argName: 'name=value', valueSeparator: '=', messages['cli.option.define.description'])
+            _(longOpt: 'configscript', args: 1, messages['cli.option.configscript.description'])
         }
         OptionAccessor options = cli.parse(args)
 
@@ -230,6 +220,12 @@ class Console implements CaretListener, HyperlinkListener, ComponentListener, Fo
             System.exit(0)
         }
 
+        if (options.hasOption('D')) {
+            options.getOptionProperties('D')?.each { k, v ->
+                System.setProperty(k, v)
+            }
+        }
+
         // full stack trace should not be logged to the output window - GROOVY-4663
         java.util.logging.Logger.getLogger(StackTraceUtils.STACK_LOG_NAME).useParentHandlers = false
 
@@ -237,7 +233,19 @@ class Console implements CaretListener, HyperlinkListener, ComponentListener, Fo
         UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName())
 
         def baseConfig = new CompilerConfiguration()
-        baseConfig.setParameters((boolean) options.hasOption("pa"))
+        String starterConfigScripts = System.getProperty("groovy.starter.configscripts", null)
+        if (options.configscript || (starterConfigScripts != null && !starterConfigScripts.isEmpty())) {
+            List<String> configScripts = new ArrayList<String>()
+            if (options.configscript) {
+                configScripts.add(options.configscript)
+            }
+            if (starterConfigScripts != null) {
+                configScripts.addAll(StringGroovyMethods.tokenize((CharSequence) starterConfigScripts, ','))
+            }
+            GroovyMain.processConfigScripts(configScripts, baseConfig)
+        }
+
+        baseConfig.setParameters(options.hasOption("pa"))
 
         if (options.i) {
             enableIndy(baseConfig)
@@ -246,8 +254,9 @@ class Console implements CaretListener, HyperlinkListener, ComponentListener, Fo
         def console = new Console(Console.class.classLoader?.getRootLoader(), new Binding(), baseConfig)
         console.useScriptClassLoaderForScriptExecution = true
         console.run()
-        if (args.length > 0 && !args[-1].toString().startsWith("-")) {
-            console.loadScriptFile(args[-1] as File)
+        def remaining = options.arguments()
+        if (remaining && !remaining[-1].startsWith("-")) {
+            console.loadScriptFile(remaining[-1] as File)
         }
 
     }
@@ -312,8 +321,10 @@ class Console implements CaretListener, HyperlinkListener, ComponentListener, Fo
 
     void newScript(ClassLoader parent, Binding binding) {
         config = new CompilerConfiguration(baseConfig)
-        if (threadInterrupt) config.addCompilationCustomizers(new ASTTransformationCustomizer(ThreadInterrupt))
-
+        config.addCompilationCustomizers(*baseConfig.compilationCustomizers)
+        if (threadInterrupt) {
+            config.addCompilationCustomizers(new ASTTransformationCustomizer(ThreadInterrupt))
+        }
         shell = new GroovyShell(parent, binding, config)
     }
 
@@ -621,8 +632,16 @@ class Console implements CaretListener, HyperlinkListener, ComponentListener, Fo
     void threadInterruption(EventObject evt) {
         threadInterrupt = evt.source.selected
         prefs.putBoolean('threadInterrupt', threadInterrupt)
-        def customizers = config.compilationCustomizers
-        customizers.clear()
+        def customizers = config.compilationCustomizers.iterator()
+        while (customizers.hasNext()) {
+            def next = customizers.next()
+            if (next instanceof ASTTransformationCustomizer) {
+                ASTTransformationCustomizer astCustomizer = next
+                if (astCustomizer.transformation instanceof ThreadInterruptibleASTTransformation) {
+                    customizers.remove()
+                }
+            }
+        }
         if (threadInterrupt) {
             config.addCompilationCustomizers(new ASTTransformationCustomizer(ThreadInterrupt))
         }
@@ -825,9 +844,9 @@ class Console implements CaretListener, HyperlinkListener, ComponentListener, Fo
     private reportException(Throwable t) {
         appendOutputNl('Exception thrown\n', commandStyle)
 
-        StringWriter sw = new StringWriter()
+        Writer sw = new StringBuilderWriter()
         new PrintWriter(sw).withWriter {pw -> StackTraceUtils.deepSanitize(t).printStackTrace(pw) }
-        appendStacktrace("\n${sw.buffer}\n")
+        appendStacktrace("\n${sw.builder}\n")
     }
 
     def finishNormal(Object result) {
@@ -911,7 +930,7 @@ class Console implements CaretListener, HyperlinkListener, ComponentListener, Fo
     }
 
     void inspectAst(EventObject evt = null) {
-        new AstBrowser(inputArea, rootElement, shell.getClassLoader()).run({ inputArea.getText() } )
+        new AstBrowser(inputArea, rootElement, shell.getClassLoader(), config).run({ inputArea.getText() } )
     }
 
     void inspectTokens(EventObject evt = null) {

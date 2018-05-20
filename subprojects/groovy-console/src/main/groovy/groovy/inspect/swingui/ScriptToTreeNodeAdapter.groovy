@@ -21,20 +21,84 @@ package groovy.inspect.swingui
 import groovy.text.GStringTemplateEngine
 import groovy.text.Template
 import groovy.transform.PackageScope
-import org.codehaus.groovy.classgen.asm.BytecodeHelper
-
-import java.util.concurrent.atomic.AtomicBoolean
+import org.apache.groovy.io.StringBuilderWriter
 import org.codehaus.groovy.GroovyBugError
+import org.codehaus.groovy.ast.AnnotationNode
+import org.codehaus.groovy.ast.ClassHelper
+import org.codehaus.groovy.ast.ClassNode
+import org.codehaus.groovy.ast.CodeVisitorSupport
+import org.codehaus.groovy.ast.ConstructorNode
+import org.codehaus.groovy.ast.DynamicVariable
+import org.codehaus.groovy.ast.FieldNode
+import org.codehaus.groovy.ast.InnerClassNode
+import org.codehaus.groovy.ast.MethodNode
+import org.codehaus.groovy.ast.ModuleNode
+import org.codehaus.groovy.ast.Parameter
+import org.codehaus.groovy.ast.PropertyNode
+import org.codehaus.groovy.ast.expr.ArgumentListExpression
+import org.codehaus.groovy.ast.expr.ArrayExpression
+import org.codehaus.groovy.ast.expr.AttributeExpression
+import org.codehaus.groovy.ast.expr.BinaryExpression
+import org.codehaus.groovy.ast.expr.BitwiseNegationExpression
+import org.codehaus.groovy.ast.expr.BooleanExpression
+import org.codehaus.groovy.ast.expr.CastExpression
+import org.codehaus.groovy.ast.expr.ClassExpression
+import org.codehaus.groovy.ast.expr.ClosureExpression
+import org.codehaus.groovy.ast.expr.ClosureListExpression
+import org.codehaus.groovy.ast.expr.ConstantExpression
+import org.codehaus.groovy.ast.expr.ConstructorCallExpression
+import org.codehaus.groovy.ast.expr.DeclarationExpression
+import org.codehaus.groovy.ast.expr.ElvisOperatorExpression
+import org.codehaus.groovy.ast.expr.Expression
+import org.codehaus.groovy.ast.expr.FieldExpression
+import org.codehaus.groovy.ast.expr.GStringExpression
+import org.codehaus.groovy.ast.expr.ListExpression
+import org.codehaus.groovy.ast.expr.MapEntryExpression
+import org.codehaus.groovy.ast.expr.MapExpression
+import org.codehaus.groovy.ast.expr.MethodCallExpression
+import org.codehaus.groovy.ast.expr.MethodPointerExpression
+import org.codehaus.groovy.ast.expr.NamedArgumentListExpression
+import org.codehaus.groovy.ast.expr.NotExpression
+import org.codehaus.groovy.ast.expr.PostfixExpression
+import org.codehaus.groovy.ast.expr.PrefixExpression
+import org.codehaus.groovy.ast.expr.PropertyExpression
+import org.codehaus.groovy.ast.expr.RangeExpression
+import org.codehaus.groovy.ast.expr.SpreadExpression
+import org.codehaus.groovy.ast.expr.SpreadMapExpression
+import org.codehaus.groovy.ast.expr.StaticMethodCallExpression
+import org.codehaus.groovy.ast.expr.TernaryExpression
+import org.codehaus.groovy.ast.expr.TupleExpression
+import org.codehaus.groovy.ast.expr.UnaryMinusExpression
+import org.codehaus.groovy.ast.expr.UnaryPlusExpression
+import org.codehaus.groovy.ast.expr.VariableExpression
+import org.codehaus.groovy.ast.stmt.AssertStatement
+import org.codehaus.groovy.ast.stmt.BlockStatement
+import org.codehaus.groovy.ast.stmt.BreakStatement
+import org.codehaus.groovy.ast.stmt.CaseStatement
+import org.codehaus.groovy.ast.stmt.CatchStatement
+import org.codehaus.groovy.ast.stmt.ContinueStatement
+import org.codehaus.groovy.ast.stmt.DoWhileStatement
+import org.codehaus.groovy.ast.stmt.EmptyStatement
+import org.codehaus.groovy.ast.stmt.ExpressionStatement
+import org.codehaus.groovy.ast.stmt.ForStatement
+import org.codehaus.groovy.ast.stmt.IfStatement
+import org.codehaus.groovy.ast.stmt.ReturnStatement
+import org.codehaus.groovy.ast.stmt.Statement
+import org.codehaus.groovy.ast.stmt.SwitchStatement
+import org.codehaus.groovy.ast.stmt.SynchronizedStatement
+import org.codehaus.groovy.ast.stmt.ThrowStatement
+import org.codehaus.groovy.ast.stmt.TryCatchStatement
+import org.codehaus.groovy.ast.stmt.WhileStatement
 import org.codehaus.groovy.classgen.BytecodeExpression
 import org.codehaus.groovy.classgen.GeneratorContext
+import org.codehaus.groovy.classgen.asm.BytecodeHelper
+import org.codehaus.groovy.control.CompilationFailedException
 import org.codehaus.groovy.control.CompilationUnit
 import org.codehaus.groovy.control.CompilationUnit.PrimaryClassNodeOperation
 import org.codehaus.groovy.control.CompilerConfiguration
 import org.codehaus.groovy.control.SourceUnit
-import org.codehaus.groovy.ast.*
-import org.codehaus.groovy.ast.expr.*
-import org.codehaus.groovy.ast.stmt.*
-import org.codehaus.groovy.control.CompilationFailedException
+
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * This class controls the conversion from a Groovy script as a String into
@@ -46,9 +110,6 @@ import org.codehaus.groovy.control.CompilationFailedException
  * not appear in the tree.
  *
  * The String label of a tree node is defined by classname in AstBrowserProperties.properties.
- *
- * @author Hamlet D'Arcy 
- * @author Roshan Dawrani
  */
 class ScriptToTreeNodeAdapter {
 
@@ -56,6 +117,7 @@ class ScriptToTreeNodeAdapter {
     boolean showScriptFreeForm, showScriptClass, showClosureClasses
     final GroovyClassLoader classLoader
     final AstBrowserNodeMaker nodeMaker
+    private final CompilerConfiguration config
 
     static {
         try {
@@ -83,12 +145,13 @@ class ScriptToTreeNodeAdapter {
         }
     }
     
-    ScriptToTreeNodeAdapter(classLoader, showScriptFreeForm, showScriptClass, showClosureClasses, nodeMaker) {
+    ScriptToTreeNodeAdapter(classLoader, showScriptFreeForm, showScriptClass, showClosureClasses, nodeMaker, config = null) {
         this.classLoader = classLoader ?: new GroovyClassLoader(getClass().classLoader)
         this.showScriptFreeForm = showScriptFreeForm
         this.showScriptClass = showScriptClass
         this.showClosureClasses = showClosureClasses
         this.nodeMaker = nodeMaker
+        this.config = config
     }
 
     /**
@@ -104,9 +167,12 @@ class ScriptToTreeNodeAdapter {
     def compile(String script, int compilePhase, boolean indy=false) {
         def scriptName = 'script' + System.currentTimeMillis() + '.groovy'
         GroovyCodeSource codeSource = new GroovyCodeSource(script, scriptName, '/groovy/script')
-        CompilerConfiguration cc = new CompilerConfiguration(CompilerConfiguration.DEFAULT)
+        CompilerConfiguration cc = new CompilerConfiguration(config ?: CompilerConfiguration.DEFAULT)
+        if (config) {
+            cc.addCompilationCustomizers(*config.compilationCustomizers)
+        }
         if (indy) {
-            cc.getOptimizationOptions().put(CompilerConfiguration.INVOKEDYNAMIC, true)
+            cc.optimizationOptions.put(CompilerConfiguration.INVOKEDYNAMIC, true)
         }
         CompilationUnit cu = new CompilationUnit(cc, codeSource.codeSource, classLoader)
         cu.setClassgenCallback(classLoader.createCollector(cu, null))
@@ -187,7 +253,7 @@ class ScriptToTreeNodeAdapter {
             GStringTemplateEngine engine = new GStringTemplateEngine()
             Template template = engine.createTemplate(templateTextForNode)
             Writable writable = template.make([expression: node])
-            StringWriter result = new StringWriter()
+            Writer result = new StringBuilderWriter()
             writable.writeTo(result)
             result.toString()
         } else {
@@ -261,7 +327,7 @@ class TreeNodeBuildingNodeOperation extends PrimaryClassNodeOperation {
 
         def innerClassNodes = compileUnit.generatedInnerClasses.values().sort { it.name }
         innerClassNodes.each { InnerClassNode innerClassNode ->
-            if (!innerClassNode.implementsInterface(ClassHelper.GENERATED_CLOSURE_Type)) return
+            if (!innerClassNode.implementsInterface(ClassHelper.GENERATED_CLOSURE_Type) && !innerClassNode.implementsInterface(ClassHelper.GENERATED_LAMBDA_TYPE)) return
             if (innerClassNode.outerMostClass != classNode) return
 
             def child = adapter.make(innerClassNode)
@@ -722,7 +788,7 @@ class TreeNodeBuildingVisitor extends CodeVisitorSupport {
     }
 
     @Override
-    protected void visitListOfExpressions(List<? extends Expression> list) {
+    void visitListOfExpressions(List<? extends Expression> list) {
         list.each { Expression node ->
             if (node instanceof NamedArgumentListExpression ) {
                 addNode(node, NamedArgumentListExpression, { it.visit(this) })

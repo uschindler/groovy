@@ -32,7 +32,7 @@ import java.util.List;
 import java.util.Map;
 
 public class TreeContext {
-    private static enum TreeContextKey {
+    private enum TreeContextKey {
         expression_replacement
     }
     final TreeContext parent;
@@ -42,6 +42,8 @@ public class TreeContext {
     final Map<Object, List<?>> userdata = MapWithDefault.newInstance(
             new HashMap<Object, List<?>>(),
             new Closure(this) {
+                private static final long serialVersionUID = -4694773031569936343L;
+
                 public Object doCall(Object key) {
                     return new LinkedList<Object>();
                 }

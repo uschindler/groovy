@@ -177,7 +177,7 @@ import groovy.transform.TypeCheckingMode//import org.codehaus.groovy.classgen.as
             class Bar {
                 def foo() {new Foo()}
             }
-        ''', 'Cannot call private constructor'
+        ''', '[Static type checking] - Cannot find matching method Foo#<init>()'
     }
 
     // GROOVY-7063
@@ -256,6 +256,24 @@ import groovy.transform.TypeCheckingMode//import org.codehaus.groovy.classgen.as
                 }
             }
             assert new SubBase().innerTest() == 123
+        '''
+    }
+
+    //GROOVY-8509
+    void testProtectedCallFromClassInSamePackage() {
+        assertScript '''
+            package org.foo
+
+            class A {
+                protected A() {}
+                protected int m() { 123 }
+            }
+            class B {
+                int test() {
+                    new A().m()
+                }
+            }
+            assert new B().test() == 123
         '''
     }
 

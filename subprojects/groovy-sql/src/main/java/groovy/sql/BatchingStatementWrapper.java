@@ -59,6 +59,14 @@ public class BatchingStatementWrapper extends GroovyObjectSupport {
 
     public void addBatch(String sql) throws SQLException {
         delegate.addBatch(sql);
+        incrementBatchCount();
+    }
+
+    /**
+     * Increments batch count (after addBatch(..) has been called)
+     * and execute {@code delegate.executeBatch()} if batchSize has been reached.
+     */
+    protected void incrementBatchCount() throws SQLException {
         batchCount++;
         if (batchCount == batchSize /* never true for batchSize of 0 */) {
             int[] result = delegate.executeBatch();
@@ -75,14 +83,27 @@ public class BatchingStatementWrapper extends GroovyObjectSupport {
     }
 
     public int[] executeBatch() throws SQLException {
-        int[] lastResult = delegate.executeBatch();
-        processResult(lastResult);
+        if (shouldCallDelegate()) {
+            int[] lastResult = delegate.executeBatch();
+            processResult(lastResult);
+        }
         int[] result = new int[results.size()];
         for (int i = 0; i < results.size(); i++) {
             result[i] = results.get(i);
         }
         reset();
         return result;
+    }
+
+    private boolean shouldCallDelegate() {
+        if (batchCount > 0) {
+            return true;
+        } else if (results.isEmpty()) {
+            log.warning("Nothing has been added to batch. This might cause the JDBC driver to throw an exception.");
+            return true;
+        }
+        // Nothing added since last delegate execution. No need to call the delegate this time.
+        return false;
     }
 
     protected void processResult(int[] lastResult) {

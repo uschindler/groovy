@@ -20,29 +20,26 @@ package groovy.inspect.swingui
 
 import groovy.lang.GroovyClassLoader.ClassCollector
 import groovy.swing.SwingBuilder
+import org.apache.groovy.io.StringBuilderWriter
 import org.codehaus.groovy.ast.ClassNode
 import org.codehaus.groovy.control.CompilationUnit
+import org.codehaus.groovy.control.CompilerConfiguration
 import org.codehaus.groovy.control.Phases
 import org.codehaus.groovy.control.SourceUnit
 import org.objectweb.asm.ClassReader
 import org.objectweb.asm.util.ASMifier
 import org.objectweb.asm.util.TraceClassVisitor
 
-import javax.swing.Action
-import javax.swing.JFrame
-import javax.swing.JSplitPane
-import javax.swing.KeyStroke
-import javax.swing.UIManager
-import javax.swing.WindowConstants
+import javax.swing.*
 import javax.swing.event.TreeSelectionEvent
 import javax.swing.event.TreeSelectionListener
 import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.DefaultTreeModel
 import javax.swing.tree.TreeNode
 import javax.swing.tree.TreeSelectionModel
-import java.awt.Cursor
-import java.awt.Font
+import java.awt.*
 import java.awt.event.KeyEvent
+import java.util.List
 import java.util.prefs.Preferences
 import java.util.regex.Pattern
 
@@ -70,11 +67,13 @@ class AstBrowser {
     GeneratedBytecodeAwareGroovyClassLoader classLoader
     def prefs = new AstBrowserUiPreferences()
     Action refreshAction
+    private CompilerConfiguration config
 
-    AstBrowser(inputArea, rootElement, classLoader) {
+    AstBrowser(inputArea, rootElement, classLoader, config = null) {
         this.inputArea = inputArea
         this.rootElement = rootElement
         this.classLoader = new GeneratedBytecodeAwareGroovyClassLoader(classLoader)
+        this.config = config
     }
 
     SwingBuilder swing
@@ -128,7 +127,7 @@ class AstBrowser {
                                 mnemonic: 'C')
                     }
                     checkBoxMenuItem(selected: showClosureClasses) {
-                        action(name: 'Generated Closure Classes', closure: this.&showClosureClasses,
+                        action(name: 'Generated Closure/Lambda Classes', closure: this.&showClosureClasses,
                                 mnemonic: 'G')
                     }
                     checkBoxMenuItem(selected: showTreeView) {
@@ -328,8 +327,9 @@ class AstBrowser {
 
     }
 
+    private static final int INITIAL_CAPACITY = 64 * 1024 // 64K
     private String generateSource(byte[] bytecode, getVisitor) {
-        def sw = new StringWriter()
+        def sw = new StringBuilderWriter(INITIAL_CAPACITY) // the generated code of `println 123` occupies about 618 bytes, so we should increase the initial capacity to 64K
         new ClassReader(bytecode).accept(getVisitor(sw), 0)
         return sw.toString()
     }
@@ -445,7 +445,7 @@ class AstBrowser {
         swing.doOutside {
             try {
 
-                String result = new AstNodeToScriptAdapter().compileToScript(source, phaseId, classLoader, showScriptFreeForm, showScriptClass)
+                String result = new AstNodeToScriptAdapter().compileToScript(source, phaseId, classLoader, showScriptFreeForm, showScriptClass, config)
                 swing.doLater {
                     decompiledSource.textEditor.text = result 
                     decompiledSource.textEditor.setCaretPosition(0)
@@ -474,7 +474,7 @@ class AstBrowser {
         swing.doOutside {
             try {
                 def nodeMaker = new SwingTreeNodeMaker()
-                def adapter = new ScriptToTreeNodeAdapter(classLoader, showScriptFreeForm, showScriptClass, showClosureClasses, nodeMaker)
+                def adapter = new ScriptToTreeNodeAdapter(classLoader, showScriptFreeForm, showScriptClass, showClosureClasses, nodeMaker, config)
                 classLoader.clearBytecodeTable()
                 def result = adapter.compile(script, compilePhase, showIndyBytecode)
                 swing.doLater {

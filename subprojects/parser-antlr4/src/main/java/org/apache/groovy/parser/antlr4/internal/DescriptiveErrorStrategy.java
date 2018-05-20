@@ -19,6 +19,7 @@
 package org.apache.groovy.parser.antlr4.internal;
 
 import org.antlr.v4.runtime.BailErrorStrategy;
+import org.antlr.v4.runtime.CharStream;
 import org.antlr.v4.runtime.FailedPredicateException;
 import org.antlr.v4.runtime.InputMismatchException;
 import org.antlr.v4.runtime.NoViableAltException;
@@ -28,7 +29,7 @@ import org.antlr.v4.runtime.RecognitionException;
 import org.antlr.v4.runtime.Token;
 import org.antlr.v4.runtime.TokenStream;
 import org.antlr.v4.runtime.atn.PredictionMode;
-import org.antlr.v4.runtime.misc.NotNull;
+import org.antlr.v4.runtime.misc.Interval;
 import org.antlr.v4.runtime.misc.ParseCancellationException;
 
 /**
@@ -38,6 +39,12 @@ import org.antlr.v4.runtime.misc.ParseCancellationException;
  *         Created on 2016/10/19
  */
 public class DescriptiveErrorStrategy extends BailErrorStrategy {
+    private CharStream charStream;
+
+    public DescriptiveErrorStrategy(CharStream charStream) {
+        this.charStream = charStream;
+    }
+
     @Override
     public void recover(Parser recognizer, RecognitionException e) {
         for (ParserRuleContext context = recognizer.getContext(); context != null; context = context.getParent()) {
@@ -69,8 +76,11 @@ public class DescriptiveErrorStrategy extends BailErrorStrategy {
         TokenStream tokens = recognizer.getInputStream();
         String input;
         if (tokens != null) {
-            if (e.getStartToken().getType() == Token.EOF) input = "<EOF>";
-            else input = tokens.getText(e.getStartToken(), e.getOffendingToken());
+            if (e.getStartToken().getType() == Token.EOF) {
+                input = "<EOF>";
+            } else {
+                input = charStream.getText(Interval.of(e.getStartToken().getStartIndex(), e.getOffendingToken().getStopIndex()));
+            }
         } else {
             input = "<unknown input>";
         }
@@ -79,32 +89,32 @@ public class DescriptiveErrorStrategy extends BailErrorStrategy {
     }
 
     @Override
-    protected void reportNoViableAlternative(@NotNull Parser recognizer,
-                                             @NotNull NoViableAltException e) {
+    protected void reportNoViableAlternative(Parser recognizer,
+                                             NoViableAltException e) {
 
         notifyErrorListeners(recognizer, this.createNoViableAlternativeErrorMessage(recognizer, e), e);
     }
 
-    protected String createInputMismatchErrorMessage(@NotNull Parser recognizer,
-                                                     @NotNull InputMismatchException e) {
+    protected String createInputMismatchErrorMessage(Parser recognizer,
+                                                     InputMismatchException e) {
         return "Unexpected input: " + getTokenErrorDisplay(e.getOffendingToken(recognizer)) +
                 "; Expecting " + e.getExpectedTokens().toString(recognizer.getVocabulary());
     }
 
-    protected void reportInputMismatch(@NotNull Parser recognizer,
-                                       @NotNull InputMismatchException e) {
+    protected void reportInputMismatch(Parser recognizer,
+                                       InputMismatchException e) {
 
         notifyErrorListeners(recognizer, this.createInputMismatchErrorMessage(recognizer, e), e);
     }
 
 
-    protected String createFailedPredicateErrorMessage(@NotNull Parser recognizer,
-                                                       @NotNull FailedPredicateException e) {
+    protected String createFailedPredicateErrorMessage(Parser recognizer,
+                                                       FailedPredicateException e) {
         return e.getMessage();
     }
 
-    protected void reportFailedPredicate(@NotNull Parser recognizer,
-                                         @NotNull FailedPredicateException e) {
+    protected void reportFailedPredicate(Parser recognizer,
+                                         FailedPredicateException e) {
         notifyErrorListeners(recognizer, this.createFailedPredicateErrorMessage(recognizer, e), e);
     }
 }

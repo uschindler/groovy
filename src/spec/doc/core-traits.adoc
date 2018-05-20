@@ -309,8 +309,8 @@ include::{projectdir}/src/spec/test/TraitsSpecificationTest.groovy[tags=multiple
 <2> trait `B` defines the very same method
 <3> class `C` implements both traits
 
-In this case, the default behavior is that methods from the *last declared trait* wins. Here, `B` is declared after `A`
-so the method from `B` will be picked up:
+In this case, the default behavior is that the method from the *last declared trait* in the `implements` clause wins.
+Here, `B` is declared after `A` so the method from `B` will be picked up:
 
 [source,groovy]
 ----
@@ -562,7 +562,7 @@ include::{projectdir}/src/spec/test/TraitsSpecificationTest.groovy[tags=sam_trai
 In Java 8, interfaces can have default implementations of methods. If a class implements an interface and does not provide
 an implementation for a default method, then the implementation from the interface is chosen. Traits behave the same but
 with a major difference: the implementation from the trait is *always* used if the class declares the trait in its interface
-list *and* that it doesn't provide an implementation.
+list *and* that it doesn't provide an implementation *even* if a super class does.
 
 This feature can be used to compose behaviors in an very precise way, in case you want to override the behavior of an
 already implemented method.
@@ -786,6 +786,7 @@ include::{projectdir}/src/spec/test/TraitsSpecificationTest.groovy[tags=selftype
 If you want to be able to call this in the trait, then you will explicitly need to cast `this` into a `Device`. This can
 quickly become unreadable with explicit casts to this everywhere.
 
+[[traits-selftype]]
 === The @SelfType annotation
 
 In order to make this contract explicit, and to make the type checker aware of the _type of itself_, Groovy provides

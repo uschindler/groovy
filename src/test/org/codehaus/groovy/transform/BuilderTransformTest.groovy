@@ -603,8 +603,26 @@ class BuilderTransformTest extends CompilableTestSupport {
             import groovy.transform.builder.*
             import groovy.transform.*
 
+            @Canonical(useSetters=true)
+            @Builder(builderStrategy=InitializerStrategy)
+            class Person {
+                String name
+                void setName(String name) { this.name = name?.toUpperCase() }
+            }
+
+            @CompileStatic
+            def make() {
+                assert new Person(Person.createInitializer().name("John")).toString() == 'Person(JOHN)'
+            }
+            make()
+        '''
+        assertScript '''
+            import groovy.transform.builder.*
+            import groovy.transform.*
+
             @Canonical
-            @Builder(builderStrategy=InitializerStrategy, useSetters=true)
+            @TupleConstructor(includes='')
+            @Builder(builderStrategy=InitializerStrategy, useSetters=true, force=true)
             class Person {
                 String name
                 void setName(String name) { this.name = name?.toUpperCase() }
@@ -754,6 +772,25 @@ class BuilderTransformTest extends CompilableTestSupport {
 
             def initializer = HasInternalProperty.createInitializer()
             assert new HasInternalProperty(initializer.$internal("foo")).$internal == "foo"
+         '''
+    }
+
+    // GROOVY-8186
+    void testJavaBeanPropertiesAreProperlyProcessed() {
+        assertScript '''
+            import groovy.transform.builder.*
+
+            class Foo {
+              String getName() {
+                'John'
+              }
+              void setName(String ignore) {}
+            }
+
+            @Builder(builderStrategy=ExternalStrategy, forClass=Foo)
+            class FooBuilder { }
+
+            assert new FooBuilder().name('Mary').build().name == 'John'
          '''
     }
 

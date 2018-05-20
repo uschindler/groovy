@@ -22,7 +22,6 @@ import groovy.lang.Tuple;
 
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
-
 import java.util.Arrays;
 import java.util.List;
 import java.util.logging.Logger;
@@ -60,11 +59,6 @@ public class BatchingPreparedStatementWrapper extends BatchingStatementWrapper {
             sql.setParameters(parameters, delegate);
         }
         delegate.addBatch();
-        batchCount++;
-        if (batchCount == batchSize /* never true for batchSize of 0 */) {
-            int[] result = delegate.executeBatch();
-            processResult(result);
-            batchCount = 0;
-        }
+        incrementBatchCount();
     }
 }

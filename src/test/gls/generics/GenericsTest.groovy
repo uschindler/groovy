@@ -18,7 +18,9 @@
  */
 package gls.generics
 
+import org.codehaus.groovy.control.CompilerConfiguration
 import org.codehaus.groovy.control.MultipleCompilationErrorsException
+import org.codehaus.groovy.control.ParserVersion
 
 class GenericsTest extends GenericsTestBase {
 
@@ -323,9 +325,9 @@ class GenericsTest extends GenericsTestBase {
     }
 
     void testGenericsDiamondShortcutIllegalPosition() {
-        shouldFailCompilationWithMessage '''
+        shouldFailCompilationWithAnyMessage '''
             List<> list4 = []
-        ''', 'unexpected token: <'
+        ''', ['unexpected token: <', 'Unexpected input: \'<\'']
     }
 
     void testGenericsInAsType() {
@@ -356,47 +358,87 @@ import java.util.concurrent.atomic.AtomicInteger
     }
 
     void testCompilationWithMissingClosingBracketsInGenerics() {
-        shouldFailCompilationWithExpectedMessage """
-            def list1 = new ArrayList<Integer()
-        """
+        if (ParserVersion.V_2 == CompilerConfiguration.DEFAULT.parserVersion) {
+            shouldFailCompilationWithExpectedMessage """
+                def list1 = new ArrayList<Integer()
+            """
 
-        shouldFailCompilationWithExpectedMessage """
-            List<Integer list2 = new ArrayList<Integer>()
-        """
+            shouldFailCompilationWithExpectedMessage """
+                List<Integer list2 = new ArrayList<Integer>()
+            """
 
-        shouldFailCompilationWithExpectedMessage """
-            def c = []
-            for (Iterator<String i = c.iterator(); i.hasNext(); ) { }
-        """
+            shouldFailCompilationWithExpectedMessage """
+                def c = []
+                for (Iterator<String i = c.iterator(); i.hasNext(); ) { }
+            """
 
-        shouldFailCompilationWithExpectedMessage """
-            def m(Class<Integer someParam) {}
-        """
+            shouldFailCompilationWithExpectedMessage """
+                def m(Class<Integer someParam) {}
+            """
 
-        shouldFailCompilationWithExpectedMessage """
-            abstract class ArrayList1<E extends AbstractList<E> implements List<E> {}
-        """
+            shouldFailCompilationWithExpectedMessage """
+                abstract class ArrayList1<E extends AbstractList<E> implements List<E> {}
+            """
 
-        shouldFailCompilationWithExpectedMessage """
-            abstract class ArrayList2<E> extends AbstractList<E implements List<E> {}
-        """
+            shouldFailCompilationWithExpectedMessage """
+                abstract class ArrayList2<E> extends AbstractList<E implements List<E> {}
+            """
 
-        shouldFailCompilationWithExpectedMessage """
-            abstract class ArrayList3<E> extends AbstractList<E> implements List<E {}
-        """
+            shouldFailCompilationWithExpectedMessage """
+                abstract class ArrayList3<E> extends AbstractList<E> implements List<E {}
+            """
 
-        shouldFailCompilationWithExpectedMessage """
-            def List<List<Integer> history = new ArrayList<List<Integer>>()
-        """
+            shouldFailCompilationWithExpectedMessage """
+                def List<List<Integer> history = new ArrayList<List<Integer>>()
+            """
 
-        shouldFailCompilationWithExpectedMessage """
-            def List<List<Integer>> history = new ArrayList<List<Integer>()
-        """
+            shouldFailCompilationWithExpectedMessage """
+                def List<List<Integer>> history = new ArrayList<List<Integer>()
+            """
+        } else {
+            shouldFailCompilationWithMessage """
+                def list1 = new ArrayList<Integer()
+            """, "Unexpected input: 'new ArrayList<Integer('"
+
+            shouldFailCompilationWithMessage """
+                List<Integer list2 = new ArrayList<Integer>()
+            """, "Unexpected input: 'List<Integer list2'"
+
+            shouldFailCompilationWithMessage """
+                def c = []
+                for (Iterator<String i = c.iterator(); i.hasNext(); ) { }
+            """, "Unexpected input: 'Iterator<String i'"
+
+            shouldFailCompilationWithMessage """
+                def m(Class<Integer someParam) {}
+            """, "Unexpected input: 'Class<Integer someParam'"
+
+            shouldFailCompilationWithMessage """
+                abstract class ArrayList1<E extends AbstractList<E> implements List<E> {}
+            """, "Unexpected input: 'implements'"
+
+            shouldFailCompilationWithMessage """
+                abstract class ArrayList2<E> extends AbstractList<E implements List<E> {}
+            """, "Unexpected input: 'AbstractList<E implements'"
+
+            shouldFailCompilationWithMessage """
+                abstract class ArrayList3<E> extends AbstractList<E> implements List<E {}
+            """, "Unexpected input: '<'"
+
+            shouldFailCompilationWithMessage """
+                def List<List<Integer> history = new ArrayList<List<Integer>>()
+            """, "Unexpected input: 'def List<List<Integer> history'"
+
+            shouldFailCompilationWithMessage """
+                def List<List<Integer>> history = new ArrayList<List<Integer>()
+            """, "Unexpected input: 'new ArrayList<List<Integer>('"
+        }
     }
 
     private void shouldFailCompilationWithExpectedMessage(scriptText) {
         shouldFailCompilationWithMessage scriptText, "Missing closing bracket '>' for generics types"
     }
+
 
     private void shouldFailCompilationWithMessage(scriptText, String errorMessage) {
         shouldFailCompilationWithMessages(scriptText, [errorMessage])
@@ -411,6 +453,23 @@ import java.util.concurrent.atomic.AtomicInteger
             errorMessages.each {
                 assert text.contains(it)
             }
+        }
+    }
+
+    private void shouldFailCompilationWithAnyMessage(scriptText, List<String> errorMessages) {
+        try {
+            assertScript scriptText
+            fail("The script compilation should have failed as it contains generics errors, e.g. mis-matching generic brackets")
+        } catch (MultipleCompilationErrorsException mcee) {
+            def text = mcee.toString()
+
+            for (errorMessage in errorMessages) {
+                if (text.contains(errorMessage)) {
+                    return
+                }
+            }
+
+            assert false, text + " can not match any expected error message: " + errorMessages
         }
     }
 
@@ -458,18 +517,35 @@ import java.util.concurrent.atomic.AtomicInteger
         shouldFailCompilationWithMessages '''
             class MyList extends ArrayList<String, String> {}
         ''', ['(supplied with 2 type parameters)', 'which takes 1 parameter']
-        shouldFailCompilationWithMessages '''
-            class MyList extends ArrayList<> {}
-        ''', ['(supplied with 0 type parameters)', 'which takes 1 parameter', 'invalid Diamond <> usage?']
+
+        if (ParserVersion.V_2 == CompilerConfiguration.DEFAULT.parserVersion) {
+            shouldFailCompilationWithMessages '''
+                class MyList extends ArrayList<> {}
+            ''', ['(supplied with 0 type parameters)', 'which takes 1 parameter', 'invalid Diamond <> usage?']
+        } else {
+            shouldFailCompilationWithMessages '''
+                class MyList extends ArrayList<> {}
+            ''', ['Unexpected input: \'ArrayList<>\'']
+        }
+
         shouldFailCompilationWithMessages '''
             class MyMap extends HashMap<String> {}
         ''', ['(supplied with 1 type parameter)', 'which takes 2 parameters']
         shouldFailCompilationWithMessages '''
             class MyList implements List<String, String> {}
         ''', ['(supplied with 2 type parameters)', 'which takes 1 parameter']
-        shouldFailCompilationWithMessages '''
-            class MyList implements Map<> {}
-        ''', ['(supplied with 0 type parameters)', 'which takes 2 parameters', 'invalid Diamond <> usage?']
+
+        if (ParserVersion.V_2 == CompilerConfiguration.DEFAULT.parserVersion) {
+            shouldFailCompilationWithMessages '''
+                class MyList implements Map<> {}
+            ''', ['(supplied with 0 type parameters)', 'which takes 2 parameters', 'invalid Diamond <> usage?']
+        } else {
+            shouldFailCompilationWithMessages '''
+                class MyList implements Map<> {}
+            ''', ['Unexpected input: \'<\'']
+        }
+
+
         shouldFailCompilationWithMessages '''
             class MyMap implements Map<String> {}
         ''', ['(supplied with 1 type parameter)', 'which takes 2 parameters']
@@ -488,6 +564,24 @@ import java.util.concurrent.atomic.AtomicInteger
         shouldFailCompilationWithMessages '''
             def now = new Date<Calendar>()
         ''', ['supplied with 1 type parameter', 'which takes no parameters']
+        shouldFailCompilationWithMessages '''
+            def method(Map<String> map) { map.toString() }
+        ''', ['(supplied with 1 type parameter)', 'which takes 2 parameters']
+        shouldFailCompilationWithMessages '''
+            def method(Map<String, Map<String>> map) { map.toString() }
+        ''', ['(supplied with 1 type parameter)', 'which takes 2 parameters']
+        shouldFailCompilationWithMessages '''
+            class MyClass { Map<String> map }
+        ''', ['(supplied with 1 type parameter)', 'which takes 2 parameters']
+        shouldFailCompilationWithMessages '''
+            class MyClass { Map<String, Map<String>> map }
+        ''', ['(supplied with 1 type parameter)', 'which takes 2 parameters']
+        shouldFailCompilationWithMessages '''
+             def method() { Map<String> map }
+        ''', ['(supplied with 1 type parameter)', 'which takes 2 parameters']
+        shouldFailCompilationWithMessages '''
+             def method() { Map<String, Map<String>> map }
+        ''', ['(supplied with 1 type parameter)', 'which takes 2 parameters']
         assertScript '''
             List<String> ss = new LinkedList<>()
         '''

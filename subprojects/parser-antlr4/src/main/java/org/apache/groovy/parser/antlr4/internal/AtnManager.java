@@ -23,8 +23,6 @@ import org.apache.groovy.parser.antlr4.GroovyLangLexer;
 import org.apache.groovy.parser.antlr4.GroovyLangParser;
 import org.apache.groovy.util.Maps;
 
-import java.util.Collections;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -37,8 +35,10 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  */
 public class AtnManager {
     public static final ReentrantReadWriteLock RRWL = new ReentrantReadWriteLock(true);
-    private static final String CACHE_THRESHOLD_NAME = "groovy.antlr4.cache.threshold";
-    private static final int CACHE_THRESHOLD;
+    private static final String DFA_CACHE_THRESHOLD_OPT = "groovy.antlr4.cache.threshold";
+    private static final int DEFAULT_DFA_CACHE_THRESHOLD = 64;
+    private static final int MIN_DFA_CACHE_THRESHOLD = 32;
+    private static final int DFA_CACHE_THRESHOLD;
     private final Class ownerClass;
     private final ATN atn;
     private static final Map<Class, AtnWrapper> ATN_MAP = Maps.of(
@@ -47,18 +47,18 @@ public class AtnManager {
     );
 
     static {
-        int t = 50;
+        int t = DEFAULT_DFA_CACHE_THRESHOLD;
 
         try {
-            t = Integer.parseInt(System.getProperty(CACHE_THRESHOLD_NAME));
+            t = Integer.parseInt(System.getProperty(DFA_CACHE_THRESHOLD_OPT));
 
-            // cache threshold should be at least 50 for better performance
-            t = t < 50 ? 50 : t;
+            // cache threshold should be at least MIN_DFA_CACHE_THRESHOLD for better performance
+            t = t < MIN_DFA_CACHE_THRESHOLD ? MIN_DFA_CACHE_THRESHOLD : t;
         } catch (Exception e) {
             // ignored
         }
 
-        CACHE_THRESHOLD = t;
+        DFA_CACHE_THRESHOLD = t;
     }
 
     public AtnManager(GroovyLangLexer lexer) {
@@ -88,7 +88,7 @@ public class AtnManager {
         }
 
         public ATN checkAndClear() {
-            if (0 != counter.incrementAndGet() % CACHE_THRESHOLD) {
+            if (0 != counter.incrementAndGet() % DFA_CACHE_THRESHOLD) {
                 return atn;
             }
 

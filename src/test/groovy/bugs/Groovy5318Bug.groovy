@@ -19,12 +19,19 @@
 package groovy.bugs
 
 import gls.CompilableTestSupport
+import org.codehaus.groovy.control.CompilerConfiguration
+import org.codehaus.groovy.control.ParserVersion
 
 class Groovy5318Bug extends CompilableTestSupport {
     void testTypeArgumentsOnlyOnTheLastComponent() {
         def message = shouldNotCompile """
             def a = new java.util<Integer>.ArrayList<ArrayList<Integer>>()
         """
-        assert message.contains('Unexpected type arguments found prior to: ArrayList')
+
+        if (ParserVersion.V_2 == CompilerConfiguration.DEFAULT.parserVersion) {
+            assert message.contains('Unexpected type arguments found prior to: ArrayList')
+        } else {
+            assert message.contains('Unexpected input: \'new java.util<Integer>.\'')
+        }
     }
 }

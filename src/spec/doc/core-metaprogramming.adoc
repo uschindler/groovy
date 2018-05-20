@@ -201,7 +201,7 @@ package groovy.lang;
 public interface GroovyInterceptable extends GroovyObject {
 }
 ----
-When a Groovy object implements the `GroovyInterceptable` interface, its `invokeMethod()` is called for any method calls. Below you can see a simple example of a object of this type:
+When a Groovy object implements the `GroovyInterceptable` interface, its `invokeMethod()` is called for any method calls. Below you can see a simple example of an object of this type:
 
 [source,groovy]
 ----
@@ -345,24 +345,122 @@ There is a distinct section on `@Category` in the <<core-metaprogramming.adoc#xf
 
 === Metaclasses
 
-(TBD)
+As explained in other section, Metaclasses has a central role in the method resolution. For every method invocation from groovy code, Groovy will find the `MetaClass` for the given object and delegate the method resolution to the metaclass via gapid:groovy.lang.MetaClass#invokeMethod(java.lang.Class,java.lang.Object,java.lang.String,java.lang.Object,boolean,boolean)[MetaClass#invokeMethod] which should not be confused with gapid:groovy.lang.GroovyObject#invokeMethod(java.lang.String,java.lang.Object)[GroovyObject#invokeMethod].
+
+
+==== The default metaclass `MetaClassImpl`
+By default objects get an instance of `MetaClassImpl` that implements the default method lookup. This method lookup includes looking up of the method in the object class ("regular" method) but also if no method is found this way it will resort to calling `methodMissing` and ultimately gapid:groovy.lang.GroovyObject.html#invokeMethod(java.lang.String,java.lang.Object)[GroovyObject#invokeMethod]
+
+
+[source,groovy]
+----
+class Foo {}
+
+def f = new Foo()
+
+assert f.metaClass =~ /MetaClassImpl/
+----
+
+
 
 ==== Custom metaclasses
 
-(TBD)
+You can change the metaclass of any object or class and replace with a custom implementation of the `MetaClass` gapi:groovy.lang.MetaClass[interface]. Usually you will want to subclass one of the existing metaclasses `MetaClassImpl`, `DelegatingMetaClass`, `ExpandoMetaClass`, `ProxyMetaClass`, etc. otherwise you will need to implement the complete method lookup logic. Before using a new metaclass instance you should call  gapid:groovy.lang.MetaClass#initialize()[] otherwise the metaclass may or may not behave as expected.
 
 ===== Delegating metaclass
 
-(TBD)
+If you only need to decorate an existing metaclass the `DelegatingMetaClass` simplifies that use case. The old metaclass implementation is still accessible via `super` making easy to apply pretransformations to the inputs, routing to other methods and postprocess the outputs.
 
-===== Magic package (Maksym Stavytskyi)
+[source,groovy]
+----
+class Foo { def bar() { "bar" } }
 
-(TBD)
+class MyFooMetaClass extends DelegatingMetaClass {
+  MyFooMetaClass(MetaClass metaClass) { super(metaClass) }
+  MyFooMetaClass(Class theClass) { super(theClass) }
+
+  Object invokeMethod(Object object, String methodName, Object[] args) {
+     def result = super.invokeMethod(object,methodName.toLowerCase(), args)
+     result.toUpperCase();
+  }
+}
+
+
+def mc =  new MyFooMetaClass(Foo.metaClass)
+mc.initialize()
+
+Foo.metaClass = mc
+def f = new Foo()
+
+assert f.BAR() == "BAR" // the new metaclass routes .BAR() to .bar() and uppercases the result
+----
+
+===== Magic package
+
+It is possible to change the metaclass at startup time by giving the metaclass a specially crafted (magic) class name  and package name. In order to change the metaclass for `java.lang.Integer` it's enough to put a class `groovy.runtime.metaclass.java.lang.IntegerMetaClass` in the classpath. This is useful, for example,  when working with frameworks if you want to to metaclass changes before your code is executed by the framework. The general form of the magic package is `groovy.runtime.metaclass.[package].[class]MetaClass`. In the example below the `[package]` is `java.lang` and the `[class]` is `Integer`:
+
+
+[source,groovy]
+----
+// file: IntegerMetaClass.groovy
+package groovy.runtime.metaclass.java.lang;
+
+class IntegerMetaClass extends DelegatingMetaClass {
+  IntegerMetaClass(MetaClass metaClass) { super(metaClass) }
+  IntegerMetaClass(Class theClass) { super(theClass) }
+  Object invokeMethod(Object object, String name, Object[] args) {
+    if (name =~ /isBiggerThan/) {
+      def other = name.split(/isBiggerThan/)[1].toInteger()
+      object > other
+    } else {
+      return super.invokeMethod(object,name, args);
+    }
+  }
+}
+----
+
+By compiling the above file with `groovyc IntegerMetaClass.groovy` a `./groovy/runtime/metaclass/java/lang/IntegerMetaClass.class` will be generated. The example below will use this new metaclass:
+
+[source,groovy]
+----
+// File testInteger.groovy
+def i = 10
+
+assert i.isBiggerThan5()
+assert !i.isBiggerThan15()
+
+println i.isBiggerThan5()
+----
+
+By running that file with `groovy -cp . testInteger.groovy` the `IntegerMetaClass` will be in the classpath and therefore it will become the metaclass for `java.lang.Integer` intercepting the method calls to `isBiggerThan*()` methods.
+
 
 ==== Per instance metaclass
 
-(TBD)
+You can change the metaclass of individual objects separately, so it's possible to have multiple object of the same class with different metaclasses.
 
+[source,groovy]
+----
+class Foo { def bar() { "bar" }}
+
+class FooMetaClass extends DelegatingMetaClass {
+  FooMetaClass(MetaClass metaClass) { super(metaClass) }
+  Object invokeMethod(Object object, String name, Object[] args) {
+      super.invokeMethod(object,name,args).toUpperCase()
+  }
+}
+
+def f1 = new Foo()
+def f2 = new Foo()
+f2.metaClass = new FooMetaClass(f2.metaClass)
+
+assert f1.bar() == "bar"
+assert f2.bar() == "BAR"
+assert f1.metaClass =~ /MetaClassImpl/
+assert f2.metaClass =~ /FooMetaClass/
+assert f1.class.toString() == "class Foo"
+assert f2.class.toString() == "class Foo"
+----
 
 [[metaprogramming_emc]]
 ==== ExpandoMetaClass
@@ -677,11 +775,11 @@ include::{projectdir}/src/spec/test/ExtensionModuleSpecTest.groovy[tags=static_e
 For Groovy to be able to load your extension methods, you must declare
 your extension helper classes. You must create a file named
 `org.codehaus.groovy.runtime.ExtensionModule` into the
-`META-INF/services` directory:
+`META-INF/groovy` directory:
 
 .org.codehaus.groovy.runtime.ExtensionModule
 --------------------------------------------------------
-include::{projectdir}/src/spec/test-resources/META-INF/services/org.codehaus.groovy.runtime.ExtensionModuleSpec[tags=extension_descriptor,indent=0]
+include::{projectdir}/src/spec/test-resources/META-INF/groovy/org.codehaus.groovy.runtime.ExtensionModuleSpec[tags=extension_descriptor,indent=0]
 --------------------------------------------------------
 
 The module descriptor requires 4 keys:
@@ -783,11 +881,6 @@ The `@ToString` annotation accepts several parameters which are summarized in th
 [cols="1,1,2,3a",options="header"]
 |=======================================================================
 |Attribute|Default value|Description|Example
-|includeNames|false|Whether to include names of properties in generated toString.|
-[source,groovy]
-----
-include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=tostring_example_includeNames,indent=0]
-----
 |excludes|Empty list|List of properties to exclude from toString|
 [source,groovy]
 ----
@@ -803,15 +896,25 @@ include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=
 ----
 include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=tostring_example_includeSuper,indent=0]
 ----
-|includeSuperProperties|False|Should super properties be included in toString|
+|includeNames|false|Whether to include names of properties in generated toString.|
 [source,groovy]
 ----
-include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=tostring_example_includeSuperProperties,indent=0]
+include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=tostring_example_includeNames,indent=0]
 ----
 |includeFields|False|Should fields be included in toString, in addition to properties|
 [source,groovy]
 ----
 include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=tostring_example_includeFields,indent=0]
+----
+|includeSuperProperties|False|Should super properties be included in toString|
+[source,groovy]
+----
+include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=tostring_example_includeSuperProperties,indent=0]
+----
+|includeSuperFields|False|Should visible super fields be included in toString|
+[source,groovy]
+----
+include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=tostring_example_includeSuperFields,indent=0]
 ----
 |ignoreNulls|False|Should properties/fields with null value be displayed|
 [source,groovy]
@@ -823,7 +926,7 @@ include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=
 ----
 include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=tostring_example_includePackage,indent=0]
 ----
-|allPropeties|True|Include all JavaBean properties in toString|
+|allProperties|True|Include all JavaBean properties in toString|
 [source,groovy]
 ----
 include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=tostring_example_allProperties,indent=0]
@@ -866,6 +969,11 @@ include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=
 ----
 include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=equalshashcode_example_includes,indent=0]
 ----
+|cache|False|Cache the hashCode computation. Should only be set to true if the class is immutable.|
+[source,groovy]
+----
+include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=equalshashcode_example_cache,indent=0]
+----
 |callSuper|False|Whether to include super in equals and hashCode calculations|
 [source,groovy]
 ----
@@ -876,13 +984,13 @@ include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=
 ----
 include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=equalshashcode_example_includeFields,indent=0]
 ----
-|cache|False|Cache the hashCode computation. Should only be set to true if the class is immutable.|
+|useCanEqual|True|Should equals call canEqual helper method.|See http://www.artima.com/lejava/articles/equality.html
+|allProperties|False|Should JavaBean properties be included in equals and hashCode calculations|
 [source,groovy]
 ----
-include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=equalshashcode_example_cache,indent=0]
+include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=equalshashcode_example_allProperties,indent=0]
 ----
-|useCanEqual|True|Should equals call canEqual helper method.|See http://www.artima.com/lejava/articles/equality.html
-|allNames|False|Should fileds and/or properties with internal names be included in equals and hashCode calculations|
+|allNames|False|Should fields and/or properties with internal names be included in equals and hashCode calculations|
 [source,groovy]
 ----
 include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=equalshashcode_example_allNames,indent=0]
@@ -893,11 +1001,19 @@ include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=
 ===== `@groovy.transform.TupleConstructor`
 
 The `@TupleConstructor` annotation aims at eliminating boilerplate code by generating constructors for you. A tuple
-constructor is created having a parameter for each property (and possibly fields). Each parameter has a default value
+constructor is created having a parameter for each property (and possibly each field). Each parameter has a default value
 (using the initial value of the property if present or otherwise Java's default value according to the properties type).
-In later compilation phases, the Groovy compiler's standard default value processing behavior is then applied.
-The end result is that multiple constructors are placed within the bytecode of your class. This provides a
-well understood semantics and is also useful for Java integration purposes. As an example, the
+
+===== Implementation Details
+
+Normally you don't need to understand the imp[ementation details of the generated constructor(s); you just use them in the normal way.
+However, if you want to add multiple constructors, understand Java integration options or meet requirements of some
+dependency injection frameworks, then some details are useful.
+
+As previously mentioned, the generated constructor has default values applied. In later compilation phases,
+the Groovy compiler's standard default value processing behavior is then applied.
+The end result is that multiple constructors are placed within the bytecode of your class.
+This provides a well understood semantics and is also useful for Java integration purposes. As an example, the
 following code will generate 3 constructors:
 
 [source,groovy]
@@ -920,9 +1036,21 @@ Setting the `defaults` attribute (see the available configuration options table)
 * Map-style named arguments won't be available
 
 This attribute is normally only used in situations where another Java framework is
-expecting exactly one constructor, e.g. injection frameworks, JUnit parameterized runners.
+expecting exactly one constructor, e.g. injection frameworks or JUnit parameterized runners.
 
-The `@TupleConstructor` AST transformation accepts several configuration options:
+===== Immutability support
+
+If the `@PropertyOptions` annotation is also found on the class with the `@TupleConstructor` annotation,
+then the generated constructor may contain custom property handling logic.
+The `propertyHandler` attribute on the `@PropertyOptions` annotation could for instance be set to
+`ImmutablePropertyHandler` which will result in the addition of the necessary logic for immutable classes
+(defensive copy in, cloning, etc.). This normally would happen automatically behind the scenes when you use
+the `@Immutable` meta-annotation.
+Some of the annotation attributes might not be supported by all property handlers.
+
+===== Customization options
+
+The `@TupleConstructor` AST transformation accepts several annotation attributes:
 
 [cols="1,1,2,3a",options="header"]
 |=======================================================================
@@ -937,25 +1065,25 @@ include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=
 ----
 include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=tupleconstructor_example_includes,indent=0]
 ----
-|includeFields|False|Should fields be included in tuple constructor generation, in addition to properties|
-[source,groovy]
-----
-include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=tupleconstructor_example_includeFields,indent=0]
-----
 |includeProperties|True|Should properties be included in tuple constructor generation|
 [source,groovy]
 ----
 include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=tupleconstructor_example_includeProperties,indent=0]
 ----
-|includeSuperFields|False|Should fields from super classes be included in tuple constructor generation|
+|includeFields|False|Should fields be included in tuple constructor generation, in addition to properties|
 [source,groovy]
 ----
-include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=tupleconstructor_example_includeSuperFields,indent=0]
+include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=tupleconstructor_example_includeFields,indent=0]
 ----
 |includeSuperProperties|True|Should properties from super classes be included in tuple constructor generation|
 [source,groovy]
 ----
 include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=tupleconstructor_example_includeSuperProperties,indent=0]
+----
+|includeSuperFields|False|Should fields from super classes be included in tuple constructor generation|
+[source,groovy]
+----
+include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=tupleconstructor_example_includeSuperFields,indent=0]
 ----
 |callSuper|False|Should super properties be called within a call to the parent constructor rather than set as properties|
 [source,groovy]
@@ -968,6 +1096,12 @@ true, the constructor will be generated and it's your responsibility to ensure t
 ----
 include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=tupleconstructor_example_force,indent=0]
 ----
+|defaults|True|Indicates that default value processing is enabled for constructor parameters.
+Set to false to obtain exactly one constructor but with initial value support and named-arguments disabled. |
+[source,groovy]
+----
+include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=tupleconstructor_example_defaults_false,indent=0]
+----
 |useSetters|False|By default, the transformation will directly set the backing field of each property
 from its corresponding constructor parameter. Setting this attribute to true, the constructor will instead call setters if
 they exist. It's usually deemed bad style from within a constructor to call setters that can be overridden. It's your
@@ -976,16 +1110,15 @@ responsibility to avoid such bad style.|
 ----
 include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=tupleconstructor_example_useSetters,indent=0]
 ----
-|defaults|True|Indicates that default value processing is enabled for constructor parameters.
-Set to false to obtain exactly one constructor but with initial value support and named-arguments disabled. |
-[source,groovy]
-----
-include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=tupleconstructor_example_defaults_false,indent=0]
-----
 |allNames|False|Should fields and/or properties with internal names be included within the constructor|
 [source,groovy]
 ----
 include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=tupleconstructor_example_allNames,indent=0]
+----
+|allProperties|False|Should JavaBean properties be included within the constructor|
+[source,groovy]
+----
+include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=tupleconstructor_example_allProperties,indent=0]
 ----
 |pre|empty|A closure containing statements to be inserted at the start of the generated constructor(s)|
 [source,groovy]
@@ -1046,7 +1179,7 @@ annotations:
 include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=canonical_simple,indent=0]
 ----
 
-A similar immutable class can be generated using the <<xform-Immutable,@Immutable>> AST transformation instead.
+A similar immutable class can be generated using the <<xform-Immutable,@Immutable>> meta-annotation instead.
 The `@Canonical` meta-annotation supports the configuration options found in the annotations
 it aggregates. See those annotations for more details.
 
@@ -1063,7 +1196,7 @@ component annotations, like this:
 include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=canonical_example_excludes,indent=0]
 ----
 
-Any applicable annotation attributes from `@Caonical` are passed along to the explicit annotation but
+Any applicable annotation attributes from `@Canonical` are passed along to the explicit annotation but
 attributes already existing in the explicit annotation take precedence.
 
 [[xform-InheritConstructors]]
@@ -1553,6 +1686,13 @@ include::{projectdir}/src/spec/test/CodeGenerationASTTransformsTest.groovy[tags=
 This category of annotations are aimed at simplifying the implementation of well-known design patterns (delegation,
 singleton, ...) by using a declarative style.
 
+[[xform-BaseScript]]
+===== `@groovy.transform.BaseScript`
+
+`@BaseScript` is used within scripts to indicate that the script should
+extend fron a custom script base class rather than `groovy.lang.Script`.
+See the documentation for <<dsl-basescript,domain specific languages>> for further details.
+
 [[xform-Delegate]]
 ===== `@groovy.lang.Delegate`
 
@@ -1660,24 +1800,86 @@ include::{projectdir}/src/spec/test/ClassDesignASTTransformsTest.groovy[tags=del
 [[xform-Immutable]]
 ===== `@groovy.transform.Immutable`
 
-The `@Immutable` AST transformation simplifies the creation of immutable classes, that is to say classes for which
-members are deemed immutable. For that, all you have to do is annotating the class like in the following example:
+The `@Immutable` meta-annotation combines the following annotations:
+
+* <<xform-ToString,@ToString>>
+* <<xform-EqualsAndHashCode,@EqualsAndHashCode>>
+* <<xform-TupleConstructor,@TupleConstructor>>
+* <<xform-MapConstructor,@MapConstructor>>
+* <<xform-ImmutableBase,@ImmutableBase>>
+* <<xform-ImmutableOptions,@ImmutableOptions>>
+* <<xform-PropertyOptions,@PropertyOptions>>
+* <<xform-KnownImmutable,@KnownImmutable>>
+
+The `@Immutable` meta-annotation simplifies the creation of immutable classes. Immutable classes are useful
+since they are often easier to reason about and are inherently thread-safe.
+See http://www.informit.com/store/effective-java-9780134685991[Effective Java, Minimize Mutability] for all the details
+about how to achieve immutable classes in Java. The `@Immutable` meta-annotation does most of the things described
+in _Effective Java_ for you automatically.
+To use the meta-annotation, all you have to do is annotate the class like in the following example:
 
 [source,groovy]
 ----
 include::{projectdir}/src/spec/test/ClassDesignASTTransformsTest.groovy[tags=immutable_simple,indent=0]
 ----
 
-Immutable classes generated with `@Immutable` are automatically made final. For a class to be immutable, you have to
-make sure that properties are of an immutable type (primitive or boxed types), of a known-immutable type or another
-class annotated with `@Immutable`. The effect of applying `@Immutable` to a class are pretty similar to those of
-applying the <<xform-Canonical,@Canonical>> AST transformation, but with an immutable class: automatic generation of
-`toString`, `equals` and `hashCode` methods for example, but trying to modify a property would throw a `ReadOnlyPropertyException`
-in that case.
+One of the requirements for immutable classes is that there is no way to modify any state information within the class.
+One requirement to achieve this is to use immutable classes for each property or alternatively perform special coding
+such as defensive copy in and defensive copy out for any mutable properties within the constructors
+and property getters. Between `@ImmutableBase`, `@MapConstructor` and `@TupleConstructor` properties
+are either identified as immutable or the special coding for numerous known cases is handled automatically.
+Various mechanisms are provided for you to extend the handled property types which are allowed. See
+`@ImmutableOptions` and `@KnownImmutable` for details.
 
-Since `@Immutable` relies on a predefined list of known immutable classes (like `java.net.URI` or `java.lang.String`
-and fails if you use a type which is not in that list, you are allowed to instruct the transformation that some types
-are deemed immutable thanks to the following parameters:
+The results of applying `@Immutable` to a class are pretty similar to those of
+applying the <<xform-Canonical,@Canonical>> meta-annotation but the generated class will have extra
+logic to handle immutability. You will observe this by, for instance, trying to modify a property
+which will result in a `ReadOnlyPropertyException` being thrown since the backing field for the property
+will have been automatically made final.
+
+The `@Immutable` meta-annotation supports the configuration options found in the annotations
+it aggregates. See those annotations for more details.
+
+[[xform-ImmutableBase]]
+===== `@groovy.transform.ImmutableBase`
+
+Immutable classes generated with `@ImmutableBase` are automatically made final. Also, the type of each property is checked
+and various checks are made on the class, for example, public instance fields currently aren't allowed. It also generates
+a `copyWith` constructor if desired.
+
+The following annotation attribute is supported:
+
+[cols="1,1,2,3a",options="header"]
+|=======================================================================
+|Attribute|Default value|Description|Example
+|copyWith|false|A boolean whether to generate a `copyWith( Map )` method.|
+[source,groovy]
+----
+include::{projectdir}/src/spec/test/ClassDesignASTTransformsTest.groovy[tags=immutable_example_copyWith,indent=0]
+----
+|=======================================================================
+
+[[xform-PropertyOptions]]
+===== `@groovy.transform.PropertyOptions`
+
+This annotation allows you to specify a custom property handler to be used by transformations
+during class construction. It is ignored by the main Groovy compiler but is referenced by other transformations
+like `@TupleConstructor`, `@MapConstructor`, and `@ImmutableBase`. It is frequently used behind the
+scenes by the `@Immutable` meta-annotation.
+
+[[xform-VisibilityOptions]]
+===== `@groovy.transform.VisibilityOptions`
+
+This annotation allows you to specify a custom visibility for a construct generated by another transformation.
+It is ignored by the main Groovy compiler but is referenced by other transformations
+like `@TupleConstructor`, `@MapConstructor`, and `@NamedVariant`.
+
+[[xform-ImumtableOptions]]
+===== `@groovy.transform.ImmutableOptions`
+
+Groovy's immutability support relies on a predefined list of known immutable classes (like `java.net.URI` or `java.lang.String`
+and fails if you use a type which is not in that list, you are allowed to add to the list of known immutable types
+thanks to the following annotation attributes of the `@ImmutableOptions` annotation:
 
 [cols="1,1,2,3a",options="header"]
 |=======================================================================
@@ -1692,13 +1894,18 @@ include::{projectdir}/src/spec/test/ClassDesignASTTransformsTest.groovy[tags=imm
 ----
 include::{projectdir}/src/spec/test/ClassDesignASTTransformsTest.groovy[tags=immutable_example_knownimmutables,indent=0]
 ----
-----
-|copyWith|false|A boolean whether to generate a `copyWith( Map )` method.|
-[source,groovy]
-----
-include::{projectdir}/src/spec/test/ClassDesignASTTransformsTest.groovy[tags=immutable_example_copyWith,indent=0]
-----
 |=======================================================================
+
+If you deem a type as immutable and it isn't one of the ones automatically handled, then it is up to you
+to correctly code that class to ensure immutability.
+
+[[xform-KnownImmutable]]
+===== `@groovy.transform.KnownImmutable`
+
+The `@KnownImmutable` annotation isn't actually one that triggers any AST transformations. It is simply
+a marker annotation. You can annotate your classes with the annotation (including Java classes) and they
+will be recognized as acceptable types for members within an immutable class. This saves you having to
+explicitly use the `knownImmutables` or `knownImmutableClasses` annotation attributes from `@ImmutableOptions`.
 
 [[xform-Memoized]]
 ===== `@groovy.transform.Memoized`
@@ -1736,6 +1943,11 @@ _protectedCacheSize>0_ would create an unlimited cache with some results protect
  create a limited cache but without any protection from garbage protection. Setting both would create a limited,
  protected cache.
 
+[[xform-TailRecursive]]
+===== `@groovy.transform.TailRecursive`
+
+TBD
+
 [[xform-Singleton]]
 ===== `@groovy.lang.Singleton`
 
@@ -1766,7 +1978,7 @@ include::{projectdir}/src/spec/test/ClassDesignASTTransformsTest.groovy[tags=sin
 In this example, we also set the `strict` parameter to false, which allows us to define our own constructor.
 
 [[xform-Mixin]]
-===== `@groovy.transform.Mixin`
+===== `@groovy.lang.Mixin`
 
 Deprecated. Consider using traits instead.
 
@@ -2345,6 +2557,43 @@ The `@PackageScope` annotation is seldom used as part of normal Groovy conventio
 for factory methods that should be visible internally within a package or for methods or constructors provided
 for testing purposes, or when integrating with third-party libraries which require such visibility conventions.
 
+[[xform-AutoFinal]]
+===== `@groovy.transform.AutoFinal`
+
+The `@AutoFinal` annotation instructs the compiler to automatically insert the final modifier
+in numerous places within the annotated node. If applied on a method (or constructor), the parameters
+for that method (or constructor) will be marked as final. If applied on a class definition, the same
+treatment will occur for all declared methods and constructors within that class.
+
+It is often considered bad practice to reassign parameters of a method or constructor with its body.
+By adding the final modifier to all parameter declarations you can avoid this practice entirely.
+Some programmers feel that adding final everywhere increases the amount of boilerplate code and makes the
+method signatures somewhat noisy. An alternative might instead be to use a code review process or apply
+a http://codenarc.org[codenarc] http://codenarc.sourceforge.net/codenarc-rules-convention.html#ParameterReassignment[rule]
+to give warnings if that practice is observed but these alternatives might lead to delayed feedback during
+quality checking rather than within the IDE or during compilation. The `@AutoFinal` annotation aims to
+maximise compiler/IDE feedback while retaining succinct code with minimum boilerplate noise.
+
+The following example illustrates applying the annotation at the class level:
+
+[source,groovy]
+----
+include::{projectdir}/src/spec/test/CompilerDirectivesASTTransformsTest.groovy[tags=autofinal_class,indent=0]
+----
+
+In this example, the two parameters for the constructor and the single parameter for
+both the `fullname` and `greeting` methods will be final. Attempts to modify those parameters within the
+constructor or method bodies will be flagged by the compiler.
+
+The following example illustrates applying the annotation at the method level:
+
+[source,groovy]
+----
+include::{projectdir}/src/spec/test/CompilerDirectivesASTTransformsTest.groovy[tags=autofinal_method,indent=0]
+----
+
+Here, the `add` method will have final parameters but the `mult` method will remain unchanged.
+
 [[xform-AnnotationCollector]]
 ===== `@groovy.transform.AnnotationCollector`
 
@@ -2371,6 +2620,12 @@ for testing purposes, or when integrating with third-party libraries which requi
 `@DelegatesTo` is not, technically speaking, an AST transformation. It is aimed at documenting code and helping the compiler in case you are
 using <<xform-TypeChecked,type checking>> or <<xform-CompileStatic, static compilation>>. The annotation is described thoroughly in the
 <<section-delegatesto,DSL section>> of this guide.
+
+[[xform-SelfType]]
+===== `@groovy.transform.SelfType`
+
+`@SelfType` is not an AST transformation but rather a marker interface used
+with traits. See the <<traits-selftype,traits documentation>> for further details.
 
 ==== Swing patterns
 
@@ -2460,7 +2715,7 @@ include::{projectdir}/src/spec/test/SwingASTTransformsTest.groovy[tags=vetoable_
 
 ==== Test assistance
 [[xform-NotYetImplemented]]
-===== `@groovy.lang.NotYetImplemented`
+===== `@groovy.transform.NotYetImplemented`
 
 `@NotYetImplemented` is used to invert the result of a JUnit 3/4 test case. It is in particular useful if a feature is not yet implemented but the test is. In that case, it is expected
 that the test fails. Marking it with `@NotYetImplemented` will inverse the result of the test, like in this example:
